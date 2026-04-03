@@ -21,7 +21,8 @@ const gDD=t=>{const s=pn(t.puntosSlStr),d=pn(t.ddPuntos);return s&&d?Math.round(
 const hBucket=h=>{if(!h||!h.includes(":"))return"";const[hh,mm]=h.split(":").map(Number);return`${String(hh).padStart(2,"0")}:${String(Math.floor(mm/5)*5).padStart(2,"0")}`}
 
 function cS(trades){
-  if(!trades.length)return{total:0,wins:0,losses:0,bes:0,winRate:0,totalR:0,totalDollar:0,bestR:0,worstR:-1,profitFactor:0,expectancy:0,expectDollar:0,avgDDpct:0,avgDurWin:0,avgDurSL:0,avgDurBE:0}
+  const z={total:0,wins:0,losses:0,bes:0,winRate:0,totalR:0,totalDollar:0,bestR:0,worstR:-1,profitFactor:0,expectancy:0,expectDollar:0,avgDDpct:0,avgDurWin:0,avgDurSL:0,avgDurBE:0,maxWinStreak:0,maxLossStreak:0,curWinStreak:0,curLossStreak:0,recoveryFactor:0,sharpeRatio:0,payoffRatio:0,sampleValid:false,consecWins:[],consecLosses:[]}
+  if(!trades.length)return z
   const rs=trades.map(gR),w=rs.filter(r=>r>0),l=rs.filter(r=>r<0),b=rs.filter(r=>r===0)
   const tR=Math.round(rs.reduce((a,c)=>a+c,0)*100)/100,gw=w.reduce((a,r)=>a+r,0),gl=Math.abs(l.reduce((a,r)=>a+r,0))
   const dd=trades.map(gDD).filter(v=>v!==null),aDD=dd.length?Math.round(dd.reduce((a,c)=>a+c,0)/dd.length*100)/100:0
@@ -29,7 +30,27 @@ function cS(trades){
   const durW=trades.filter(t=>t.resultado==="WIN").map(t=>pn(t.duracionTrade)).filter(v=>v>0)
   const durS=trades.filter(t=>t.resultado==="SL").map(t=>pn(t.duracionTrade)).filter(v=>v>0)
   const durB=trades.filter(t=>t.resultado==="BE").map(t=>pn(t.duracionTrade)).filter(v=>v>0)
-  return{total:trades.length,wins:w.length,losses:l.length,bes:b.length,winRate:Math.round(w.length/trades.length*10000)/100,totalR:tR,totalDollar:Math.round(tR*RV),bestR:rs.length?Math.max(...rs):0,worstR:rs.length?Math.min(...rs):0,profitFactor:gl?Math.round(gw/gl*10000)/10000:gw>0?Infinity:0,expectancy:exp,expectDollar:Math.round(exp*RV),avgDDpct:aDD,avgDurWin:durW.length?Math.round(durW.reduce((a,c)=>a+c,0)/durW.length):0,avgDurSL:durS.length?Math.round(durS.reduce((a,c)=>a+c,0)/durS.length):0,avgDurBE:durB.length?Math.round(durB.reduce((a,c)=>a+c,0)/durB.length):0}
+  // Streaks
+  let mxW=0,mxL=0,cW=0,cL=0;const cWs=[],cLs=[]
+  const sorted=[...trades].sort((a,b2)=>new Date(a.fecha)-new Date(b2.fecha))
+  sorted.forEach(t=>{const r=gR(t);if(r>0){cW++;if(cL>0){cLs.push(cL);cL=0}}else if(r<0){cL++;if(cW>0){cWs.push(cW);cW=0}}else{if(cW>0)cWs.push(cW);if(cL>0)cLs.push(cL);cW=0;cL=0}; mxW=Math.max(mxW,cW);mxL=Math.max(mxL,cL)})
+  if(cW>0)cWs.push(cW);if(cL>0)cLs.push(cL)
+  // Max drawdown in R (equity curve)
+  let peak=0,maxDD2=0,cum=0
+  sorted.forEach(t=>{cum+=gR(t);if(cum>peak)peak=cum;const dd2=peak-cum;if(dd2>maxDD2)maxDD2=dd2})
+  const recovF=maxDD2>0?Math.round(tR/maxDD2*100)/100:tR>0?Infinity:0
+  // Sharpe ratio (mean R / stddev R)
+  const mean=tR/trades.length
+  const variance=rs.reduce((a,r)=>a+Math.pow(r-mean,2),0)/rs.length
+  const stddev=Math.sqrt(variance)
+  const sharpe=stddev>0?Math.round(mean/stddev*100)/100:0
+  // Payoff ratio (avg win R / avg loss R)
+  const avgWinR=w.length?Math.round(gw/w.length*100)/100:0
+  const avgLossR=l.length?Math.round(gl/l.length*100)/100:1
+  const payoff=avgLossR>0?Math.round(avgWinR/avgLossR*100)/100:avgWinR>0?Infinity:0
+  // Sample size: need min 30 trades for statistical relevance
+  const sampleOk=trades.length>=30
+  return{total:trades.length,wins:w.length,losses:l.length,bes:b.length,winRate:Math.round(w.length/trades.length*10000)/100,totalR:tR,totalDollar:Math.round(tR*RV),bestR:rs.length?Math.max(...rs):0,worstR:rs.length?Math.min(...rs):0,profitFactor:gl?Math.round(gw/gl*10000)/10000:gw>0?Infinity:0,expectancy:exp,expectDollar:Math.round(exp*RV),avgDDpct:aDD,avgDurWin:durW.length?Math.round(durW.reduce((a,c)=>a+c,0)/durW.length):0,avgDurSL:durS.length?Math.round(durS.reduce((a,c)=>a+c,0)/durS.length):0,avgDurBE:durB.length?Math.round(durB.reduce((a,c)=>a+c,0)/durB.length):0,maxWinStreak:mxW,maxLossStreak:mxL,curWinStreak:cW,curLossStreak:cL,recoveryFactor:recovF,sharpeRatio:sharpe,payoffRatio:payoff,sampleValid:sampleOk,maxEquityDD:Math.round(maxDD2*100)/100,consecWins:cWs,consecLosses:cLs}
 }
 const grpBy=(trades,fn)=>{const m={};trades.forEach(t=>{const k=fn(t);if(k)(m[k]??=[]).push(t)});return Object.entries(m).sort((a,b)=>b[0].localeCompare(a[0])).map(([k,ts])=>({key:k,...cS(ts)}))}
 
@@ -85,6 +106,17 @@ function suggestions(trades){
   // Best setup
   const su={};SETUPS.forEach(s2=>{const ts2=trades.filter(t=>t.setup===s2);if(ts2.length>=3)su[s2]=cS(ts2)})
   const suE=Object.entries(su);if(suE.length>1){const best=suE.reduce((a,[k,v])=>v.totalR>a[1].totalR?[k,v]:a,suE[0]);tips.push({type:"green",text:`Setup ${best[0]} es tu mas rentable: ${best[1].winRate.toFixed(2)}% win rate, ${fmtPF(best[1].profitFactor)} PF`})}
+  // Streaks
+  if(s.maxLossStreak>=3)tips.push({type:"red",text:`Tu racha negativa maxima es ${s.maxLossStreak} trades consecutivos. ${s.curLossStreak>=2?`ALERTA: llevas ${s.curLossStreak} losses seguidos ahora.`:""}`})
+  if(s.maxWinStreak>=3)tips.push({type:"green",text:`Tu mejor racha positiva: ${s.maxWinStreak} wins consecutivos${s.curWinStreak>=2?` (actual: ${s.curWinStreak})`:""}`})
+  // Recovery factor
+  if(s.recoveryFactor!==Infinity&&s.recoveryFactor>0)tips.push({type:s.recoveryFactor>=2?"green":s.recoveryFactor>=1?"yellow":"red",text:`Recovery Factor: ${s.recoveryFactor.toFixed(2)} (ganancia total / max drawdown). ${s.recoveryFactor>=2?"Excelente recuperacion":s.recoveryFactor>=1?"Recuperacion aceptable":"Necesitas mejorar la recuperacion"}`})
+  // Sharpe
+  if(s.sharpeRatio!==0)tips.push({type:s.sharpeRatio>=1?"green":s.sharpeRatio>=0.5?"yellow":"red",text:`Sharpe Ratio: ${s.sharpeRatio.toFixed(2)}. ${s.sharpeRatio>=1?"Excelente consistencia":s.sharpeRatio>=0.5?"Consistencia aceptable":"Retornos muy volatiles, busca mas consistencia"}`})
+  // Payoff
+  if(s.payoffRatio!==Infinity&&s.payoffRatio>0)tips.push({type:s.payoffRatio>=2?"green":"yellow",text:`Payoff Ratio: ${s.payoffRatio.toFixed(2)} (promedio R ganado / promedio R perdido). ${s.payoffRatio>=2?"Tus wins compensan bien los losses":"Intenta dejar correr mas los winners"}`})
+  // Sample size
+  if(!s.sampleValid)tips.push({type:"yellow",text:`Tienes ${s.total} trades. Necesitas minimo 30 para que las estadisticas sean confiables.`})
   return tips
 }
 
@@ -228,8 +260,8 @@ function App(){
 
 {/* DASHBOARD */}
 {tab==="dashboard"&&<><div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:20,flexWrap:"wrap",gap:10}}><div><h1 className="pt">Dashboard</h1><p className="ps">{trades.length} trades | 1R={fmt$(RV)}</p></div><Filters/></div>
-<div className="metrics"><M label="P&L" value={`${stats.totalR>=0?"+":""}${stats.totalR}R`} sub={fmt$(stats.totalDollar)} color={stats.totalR>=0?"var(--green)":"var(--red)"} big/><M label="Win rate" value={`${stats.winRate.toFixed(2)}%`} color={stats.winRate>=50?"var(--green)":"var(--red)"} sub={`${stats.wins}W|${stats.losses}L|${stats.bes}BE`}/><M label="PF" value={fmtPF(stats.profitFactor)} color={stats.profitFactor>=1.5?"var(--green)":stats.profitFactor>=1?"var(--yellow)":"var(--red)"}/><M label="Expectancy" value={`${stats.expectancy}R`} color={stats.expectancy>0?"var(--green)":"var(--red)"} sub={fmt$(stats.expectDollar)+"/trade"}/><M label="DD avg" value={`${stats.avgDDpct}%`} color="var(--purple)"/><M label="Trades" value={stats.total}/></div>
-<div className="card"><div className="st">Resumen</div><div className="info-grid"><div className="info-item"><div className="ml">Dia mas ganador</div><div className="val" style={{color:"var(--green)"}}>{extra.bestDay}</div></div><div className="info-item"><div className="ml">Dia mas perdedor</div><div className="val" style={{color:"var(--red)"}}>{extra.worstDay}</div></div><div className="info-item"><div className="ml">Ops/dia</div><div className="val">{extra.avgOps}</div></div><div className="info-item"><div className="ml">Mejor dia semana</div><div className="val" style={{color:"var(--green)"}}>{extra.bestWd}</div></div><div className="info-item"><div className="ml">Peor dia semana</div><div className="val" style={{color:"var(--red)"}}>{extra.worstWd}</div></div><div className="info-item"><div className="ml">Duracion WIN</div><div className="val">{stats.avgDurWin}min</div></div><div className="info-item"><div className="ml">Duracion SL</div><div className="val">{stats.avgDurSL}min</div></div><div className="info-item"><div className="ml">Duracion BE</div><div className="val">{stats.avgDurBE}min</div></div></div></div>
+<div className="metrics"><M label="P&L" value={`${stats.totalR>=0?"+":""}${stats.totalR}R`} sub={fmt$(stats.totalDollar)} color={stats.totalR>=0?"var(--green)":"var(--red)"} big/><M label="Win rate" value={`${stats.winRate.toFixed(2)}%`} color={stats.winRate>=50?"var(--green)":"var(--red)"} sub={`${stats.wins}W|${stats.losses}L|${stats.bes}BE`}/><M label="PF" value={fmtPF(stats.profitFactor)} color={stats.profitFactor>=1.5?"var(--green)":stats.profitFactor>=1?"var(--yellow)":"var(--red)"}/><M label="Expectancy" value={`${stats.expectancy}R`} color={stats.expectancy>0?"var(--green)":"var(--red)"} sub={fmt$(stats.expectDollar)+"/trade"}/><M label="Sharpe" value={stats.sharpeRatio.toFixed(2)} color={stats.sharpeRatio>=1?"var(--green)":stats.sharpeRatio>=0.5?"var(--yellow)":"var(--red)"}/><M label="Recovery F" value={stats.recoveryFactor===Infinity?"∞":stats.recoveryFactor.toFixed(2)} color={stats.recoveryFactor>=2?"var(--green)":stats.recoveryFactor>=1?"var(--yellow)":"var(--red)"} sub={`Max DD: ${stats.maxEquityDD||0}R`}/><M label="Payoff" value={stats.payoffRatio===Infinity?"∞":stats.payoffRatio.toFixed(2)} color={stats.payoffRatio>=2?"var(--green)":stats.payoffRatio>=1?"var(--yellow)":"var(--red)"}/><M label="DD avg" value={`${stats.avgDDpct}%`} color="var(--purple)"/><M label="Trades" value={stats.total} sub={stats.sampleValid?"Muestra valida":"Necesitas 30+"} color={stats.sampleValid?"var(--green)":"var(--yellow)"}/></div>
+<div className="card"><div className="st">Resumen</div><div className="info-grid"><div className="info-item"><div className="ml">Dia mas ganador</div><div className="val" style={{color:"var(--green)"}}>{extra.bestDay}</div></div><div className="info-item"><div className="ml">Dia mas perdedor</div><div className="val" style={{color:"var(--red)"}}>{extra.worstDay}</div></div><div className="info-item"><div className="ml">Ops/dia</div><div className="val">{extra.avgOps}</div></div><div className="info-item"><div className="ml">Mejor dia semana</div><div className="val" style={{color:"var(--green)"}}>{extra.bestWd}</div></div><div className="info-item"><div className="ml">Peor dia semana</div><div className="val" style={{color:"var(--red)"}}>{extra.worstWd}</div></div><div className="info-item"><div className="ml">Racha WIN max</div><div className="val" style={{color:"var(--green)"}}>{stats.maxWinStreak} trades{stats.curWinStreak>0?` (actual: ${stats.curWinStreak})`:""}</div></div><div className="info-item"><div className="ml">Racha LOSS max</div><div className="val" style={{color:"var(--red)"}}>{stats.maxLossStreak} trades{stats.curLossStreak>0?` (actual: ${stats.curLossStreak})`:""}</div></div><div className="info-item"><div className="ml">Duracion WIN</div><div className="val">{stats.avgDurWin}min</div></div><div className="info-item"><div className="ml">Duracion SL</div><div className="val">{stats.avgDurSL}min</div></div><div className="info-item"><div className="ml">Duracion BE</div><div className="val">{stats.avgDurBE}min</div></div></div></div>
 <div className="g2" style={{marginBottom:14}}><div className="card"><div className="st">Equity curve</div><EC trades={filtered}/></div><div className="card"><div className="st">Resultados</div><div style={{display:"flex",gap:20,flexWrap:"wrap"}}>{[["WIN",stats.wins,"var(--green)"],["SL",stats.losses,"var(--red)"],["BE",stats.bes,"var(--yellow)"]].map(([l,v,c])=><div key={l} style={{textAlign:"center"}}><div style={{fontSize:28,fontWeight:700,fontFamily:"var(--mono)",color:c}}>{stats.total?Math.round(v/stats.total*10000)/100:0}%</div><div style={{fontSize:11,color:"var(--text3)",fontFamily:"var(--mono)"}}>{l} ({v})</div></div>)}</div></div></div>
 <div className="card"><div className="st">P&L diario (R)</div><BC data={daily.slice(0,20).reverse().map(d=>d.totalR)} labels={daily.slice(0,20).reverse().map(d=>fmtD(d.key))} unit="R"/></div>
 <div className="card"><div className="ch"><span className="st" style={{margin:0}}>Recientes</span><button className="btn bo bx" onClick={()=>setTab("trades")}>Ver todos</button></div><div style={{overflowX:"auto"}}><table className="tbl"><thead><tr><th>Fecha</th><th>Setup</th><th>B/S</th><th>R</th><th>Rmax</th><th>P&L</th><th>Result</th><th>DD%</th><th>Dir</th></tr></thead><tbody>{filtered.slice(0,8).map(t=>{const r=gR(t),dd=gDD(t);return<tr key={t.id} style={{cursor:"pointer"}} onClick={()=>edit(t)}><td className="mono">{fmtD(t.fecha)}</td><td><ST s={t.setup}/></td><td><BT bs={t.buySell}/></td><td className="mono bold" style={{color:r>0?"var(--green)":r<0?"var(--red)":"var(--yellow)"}}>{fmtR(r)}</td><td className="mono" style={{color:"var(--purple)"}}>{pn(t.rMaximo)>0?t.rMaximo+"R":""}</td><td className="mono bold" style={{color:r>=0?"var(--green)":"var(--red)"}}>{fmt$(r*RV)}</td><td><RT res={t.resultado}/></td><td className="mono" style={{color:"var(--purple)"}}>{dd!==null?dd+"%":""}</td><td><DT2 dir={t.direccionDia}/></td></tr>})}</tbody></table></div>{!filtered.length&&<div className="em">Sin trades</div>}</div></>}
