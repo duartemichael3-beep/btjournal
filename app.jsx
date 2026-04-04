@@ -41,73 +41,113 @@ function parseNT8CSV(csvText){
   const iPrice=hdr.indexOf("Price"),iTime=hdr.indexOf("Time"),iEX=hdr.indexOf("E/X")
   if(iAction<0||iQty<0||iPrice<0||iTime<0||iEX<0)return[]
 
-  // Parse all rows, sorted by time
-  const rows=lines.slice(1).map(line=>{
+  // Parse rows
+  let rows=lines.slice(1).map(line=>{
     const vs=line.split(",").map(v=>v.trim())
     return{instrument:vs[iInst]||"",action:vs[iAction]||"",qty:parseInt(vs[iQty])||0,price:parseFloat(vs[iPrice])||0,time:vs[iTime]||"",ex:(vs[iEX]||"").trim()}
   }).filter(r=>r.action&&r.qty&&r.price&&r.time)
 
-  // Sort by parsed time
+  // Deduplicate
+  const seen=new Set()
+  rows=rows.filter(r=>{const k=`${r.time}|${r.action}|${r.qty}|${r.price}|${r.ex}`;if(seen.has(k))return false;seen.add(k);return true})
+
+  // Sort by time
   rows.sort((a,b)=>{const ta=parseNT8Time(a.time),tb=parseNT8Time(b.time);return(ta||0)-(tb||0)})
 
-  // Match: each Entry row pairs with subsequent Exit row(s) of OPPOSITE action
-  // until exit qty >= entry qty, or next Entry appears
+  // Helper to build a trade object
+  const makeTrade=(is_buy,ep,eq,inst,entryTime,exits)=>{
+    const mult=getMultiplier(inst)
+    const txq=exits.reduce((a,e)=>a+e.qty,0)
+    const wavg=exits.reduce((a,e)=>a+e.price*e.qty,0)/txq
+    const exitTime=parseNT8Time(exits[exits.length-1].time)
+    const c=Math.min(eq,txq)
+    const pts=is_buy?wavg-ep:ep-wavg
+    const ptsR=Math.round(pts*100)/100
+    const dollar=ptsR*c*mult
+    const rVal=Math.round(dollar/RV*100)/100
+    const eDate=parseNT8Time(entryTime)
+    const fecha=eDate?`${eDate.getFullYear()}-${String(eDate.getMonth()+1).padStart(2,"0")}-${String(eDate.getDate()).padStart(2,"0")}`:""
+    const hi=eDate?`${String(eDate.getHours()).padStart(2,"0")}:${String(eDate.getMinutes()).padStart(2,"0")}`:""
+    const hf=exitTime?`${String(exitTime.getHours()).padStart(2,"0")}:${String(exitTime.getMinutes()).padStart(2,"0")}`:""
+    let resultado,rResultado
+    if(dollar>5){resultado="WIN";rResultado=String(Math.round(Math.abs(rVal)*100)/100)}
+    else if(dollar<-5){resultado="SL";rResultado=String(Math.round(rVal*100)/100)}
+    else{resultado="BE";rResultado="0"}
+    return{...DFT,fecha,horaInicio:hi,horaFinal:hf,duracionTrade:String(cDur(hi,hf)||""),buySell:is_buy?"BUY":"SELL",puntosSlStr:String(Math.abs(ptsR)),rResultado,rMaximo:"",resultado,notas:`NT8: ${inst} ${c}ct @ ${ep}→${Math.round(wavg*100)/100} = ${ptsR}pts ${fmt$(Math.round(dollar))} (${rVal}R)`}
+  }
+
+  // ═══ PASS 1: Standard Entry → opposite Exit matching ═══
+  const used=new Set()
   const trades=[]
   let i=0
   while(i<rows.length){
     const r=rows[i]
-    if(r.ex==="Entry"){
-      const entryRow=r
-      const entryQty=entryRow.qty
-      const entryPrice=entryRow.price
-      const isBuy=entryRow.action==="Buy"
-      const instrument=entryRow.instrument
-      const mult=getMultiplier(instrument)
-      // Collect subsequent Exit rows of opposite action
-      const exits=[]
-      let exitQty=0
-      let j=i+1
-      while(j<rows.length&&exitQty<entryQty){
-        const nr=rows[j]
-        if(nr.ex==="Exit"){
-          // Verify opposite action (Buy entry -> Sell exit, Sell entry -> Buy exit)
-          const isOpposite=(isBuy&&nr.action==="Sell")||(!isBuy&&nr.action==="Buy")
-          if(isOpposite){exits.push(nr);exitQty+=nr.qty}
-          else break
-        }else break // next Entry starts
-        j++
-      }
-      if(exits.length>0){
-        const totalExitQty=exits.reduce((a,e)=>a+e.qty,0)
-        const avgExitPrice=exits.reduce((a,e)=>a+e.price*e.qty,0)/totalExitQty
-        const points=isBuy?avgExitPrice-entryPrice:entryPrice-avgExitPrice
-        const pointsRound=Math.round(points*100)/100
-        const contracts=Math.min(entryQty,totalExitQty)
-        const dollarPL=pointsRound*contracts*mult
-        const rValue=Math.round(dollarPL/RV*100)/100
-
-        const entryDate=parseNT8Time(entryRow.time)
-        const exitDate=parseNT8Time(exits[exits.length-1].time)
-        const fecha=entryDate?`${entryDate.getFullYear()}-${String(entryDate.getMonth()+1).padStart(2,"0")}-${String(entryDate.getDate()).padStart(2,"0")}`:""
-        const horaInicio=entryDate?`${String(entryDate.getHours()).padStart(2,"0")}:${String(entryDate.getMinutes()).padStart(2,"0")}`:""
-        const horaFinal=exitDate?`${String(exitDate.getHours()).padStart(2,"0")}:${String(exitDate.getMinutes()).padStart(2,"0")}`:""
-        const dur=cDur(horaInicio,horaFinal)
-
-        let resultado,rResultado
-        if(dollarPL>5){resultado="WIN";rResultado=String(Math.round(Math.abs(rValue)*100)/100)}
-        else if(dollarPL<-5){resultado="SL";rResultado=String(Math.round(rValue*100)/100)}
-        else{resultado="BE";rResultado="0"}
-
-        trades.push({
-          ...DFT,fecha,horaInicio,horaFinal,duracionTrade:String(dur||""),
-          buySell:isBuy?"BUY":"SELL",puntosSlStr:String(Math.abs(pointsRound)),
-          rResultado,rMaximo:"",resultado,
-          notas:`NT8: ${instrument} ${contracts}ct @ ${entryPrice}→${Math.round(avgExitPrice*100)/100} = ${pointsRound}pts ${fmt$(Math.round(dollarPL))} (${rValue}R)`
-        })
-        i=j
-      }else{i++}
-    }else{i++} // skip orphan Exit rows
+    if(r.ex!=="Entry"){i++;continue}
+    const isBuy=r.action==="Buy"
+    const eq=r.qty,ep=r.price,inst=r.instrument
+    const exits=[]
+    let exitQty=0,j=i+1
+    while(j<rows.length&&exitQty<eq){
+      const nr=rows[j]
+      if(nr.ex==="Exit"){
+        const isOpp=(isBuy&&nr.action==="Sell")||(!isBuy&&nr.action==="Buy")
+        if(isOpp){exits.push({idx:j,...nr});exitQty+=nr.qty}else break
+      }else if(nr.ex==="Entry")break
+      j++
+    }
+    if(exits.length){
+      trades.push(makeTrade(isBuy,ep,eq,inst,r.time,exits))
+      used.add(i);exits.forEach(e=>used.add(e.idx))
+      i=exits[exits.length-1].idx+1
+    }else{i++}
   }
+
+  // ═══ PASS 2: Match leftover entries with orphan exits on SAME DAY ═══
+  const unmatched=rows.map((r,idx)=>({idx,...r})).filter(r=>!used.has(r.idx)&&r.ex==="Entry")
+  const orphans=rows.map((r,idx)=>({idx,...r})).filter(r=>!used.has(r.idx)&&r.ex==="Exit")
+
+  // Group unmatched entries by date+direction
+  const entryGroups={}
+  unmatched.forEach(r=>{
+    const d=parseNT8Time(r.time);if(!d)return
+    const k=`${d.getFullYear()}${String(d.getMonth()+1).padStart(2,"0")}${String(d.getDate()).padStart(2,"0")}|${r.action}`
+    ;(entryGroups[k]??=[]).push(r)
+  })
+  // Group orphan exits by date+direction
+  const exitGroups={}
+  orphans.forEach(r=>{
+    const d=parseNT8Time(r.time);if(!d)return
+    const k=`${d.getFullYear()}${String(d.getMonth()+1).padStart(2,"0")}${String(d.getDate()).padStart(2,"0")}|${r.action}`
+    ;(exitGroups[k]??=[]).push(r)
+  })
+  const used2=new Set()
+  Object.entries(entryGroups).forEach(([ekey,entries])=>{
+    const[dateStr,eAction]=ekey.split("|")
+    const isBuy=eAction==="Buy"
+    const xkey=`${dateStr}|${isBuy?"Sell":"Buy"}`
+    const availExits=(exitGroups[xkey]||[]).filter(x=>!used2.has(x.idx))
+    if(!availExits.length)return
+    const totalEQ=entries.reduce((a,e)=>a+e.qty,0)
+    const wavgEP=entries.reduce((a,e)=>a+e.price*e.qty,0)/totalEQ
+    const inst=entries[0].instrument
+    const et=parseNT8Time(entries[0].time)
+    if(!et)return
+    // Find exits after entry time
+    const matchedExits=[]
+    let mq=0
+    availExits.sort((a,b)=>(parseNT8Time(a.time)||0)-(parseNT8Time(b.time)||0))
+    for(const ex of availExits){
+      const xt=parseNT8Time(ex.time);if(!xt||xt<et)continue
+      // Same session check (<8h)
+      if((xt-et)/1000>8*3600)continue
+      matchedExits.push(ex);mq+=ex.qty
+      if(mq>=totalEQ)break
+    }
+    if(!matchedExits.length)return
+    trades.push(makeTrade(isBuy,wavgEP,totalEQ,inst,entries[0].time,matchedExits))
+    matchedExits.forEach(x=>used2.add(x.idx))
+  })
+
   return trades
 }
 
@@ -431,6 +471,20 @@ function MainApp({user,onLogout}){
     reader.readAsText(f)
   }
 
+  // Delete all trades for current mode
+  const deleteAllMode=async()=>{
+    const count=trades.length
+    if(!count)return alert("No hay trades en "+modeLabel)
+    if(!confirm(`Borrar los ${count} trades de ${modeLabel}?`))return
+    if(!confirm(`CONFIRMAR: Esto eliminara ${count} trades de ${modeLabel} permanentemente.`))return
+    setSaving(true)
+    try{
+      await supa(`trades?user_id=eq.${user.id}&mode=eq.${appMode}`,{method:"DELETE"})
+      await loadTrades()
+      alert(`${count} trades de ${modeLabel} eliminados`)
+    }catch(e){alert("Error: "+e.message)}finally{setSaving(false)}
+  }
+
   // NT8 Import handler
   const handleNT8Import=async(parsedTrades)=>{
     setSaving(true)
@@ -491,6 +545,7 @@ function MainApp({user,onLogout}){
         <button onClick={exportCSV}>Exportar CSV</button>
         <label>Importar CSV<input type="file" accept=".csv" onChange={importCSV} style={{display:"none"}}/></label>
         {appMode==="journal"&&<button onClick={()=>setShowNT8(true)} style={{color:"var(--purple)",borderColor:"var(--pd)",background:"var(--pd)"}}>Importar NT8</button>}
+        {trades.length>0&&<button onClick={deleteAllMode} style={{color:"var(--red)",borderColor:"var(--rd)",background:"var(--rd)",fontSize:10}}>Borrar {trades.length} trades {modeLabel}</button>}
         <button onClick={()=>{localStorage.removeItem("btj_user");onLogout()}} style={{color:"var(--red)"}}>Cerrar sesion</button>
       </div>
     </div>
