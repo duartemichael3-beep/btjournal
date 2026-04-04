@@ -431,6 +431,20 @@ function MainApp({user,onLogout}){
     reader.readAsText(f)
   }
 
+  // Delete all trades for current mode
+  const deleteAllMode=async()=>{
+    const count=trades.length
+    if(!count)return alert("No hay trades en "+modeLabel)
+    if(!confirm(`Borrar los ${count} trades de ${modeLabel}?`))return
+    if(!confirm(`CONFIRMAR: Esto eliminara ${count} trades de ${modeLabel} permanentemente.`))return
+    setSaving(true)
+    try{
+      await supa(`trades?user_id=eq.${user.id}&mode=eq.${appMode}`,{method:"DELETE"})
+      await loadTrades()
+      alert(`${count} trades de ${modeLabel} eliminados`)
+    }catch(e){alert("Error: "+e.message)}finally{setSaving(false)}
+  }
+
   // NT8 Import handler
   const handleNT8Import=async(parsedTrades)=>{
     setSaving(true)
@@ -491,6 +505,7 @@ function MainApp({user,onLogout}){
         <button onClick={exportCSV}>Exportar CSV</button>
         <label>Importar CSV<input type="file" accept=".csv" onChange={importCSV} style={{display:"none"}}/></label>
         {appMode==="journal"&&<button onClick={()=>setShowNT8(true)} style={{color:"var(--purple)",borderColor:"var(--pd)",background:"var(--pd)"}}>Importar NT8</button>}
+        {trades.length>0&&<button onClick={deleteAllMode} style={{color:"var(--red)",borderColor:"var(--rd)",background:"var(--rd)",fontSize:10}}>Borrar {trades.length} trades {modeLabel}</button>}
         <button onClick={()=>{localStorage.removeItem("btj_user");onLogout()}} style={{color:"var(--red)"}}>Cerrar sesion</button>
       </div>
     </div>
