@@ -53,13 +53,35 @@ const pn = v => { const n = parseFloat(v); return isNaN(n) ? 0 : n }
 const fmt$ = v => (v < 0 ? "-" : "") + "$" + Math.abs(v).toLocaleString()
 const fmtR = v => (v > 0 ? "+" : "") + v + "R"
 const fmtPF = v => v === Infinity ? "∞" : v.toFixed(2)
+
+// Safe date parser: "YYYY-MM-DD" → local Date (no UTC shift)
+const safeDate = ds => {
+  if (!ds) return null
+  const p = ds.split("-")
+  if (p.length === 3) return new Date(parseInt(p[0]), parseInt(p[1]) - 1, parseInt(p[2]))
+  return new Date(ds)
+}
 const fmtD = ds => {
   if (!ds) return ""
+  const p = ds.split("-")
+  if (p.length === 3) return `${p[2].padStart(2, "0")}/${p[1].padStart(2, "0")}/${p[0].slice(-2)}`
   const d = new Date(ds)
   return `${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")}/${String(d.getFullYear()).slice(-2)}`
 }
-const getMo = ds => ds ? new Date(ds).toLocaleString("es", { month: "short" }) + " " + String(new Date(ds).getFullYear()).slice(-2) : ""
-const getYr = ds => ds ? String(new Date(ds).getFullYear()).slice(-2) : ""
+const getMo = ds => {
+  if (!ds) return ""
+  const p = ds.split("-")
+  if (p.length === 3) {
+    const mn = ["ene","feb","mar","abr","may","jun","jul","ago","sep","oct","nov","dic"]
+    return `${mn[parseInt(p[1]) - 1]} ${p[0].slice(-2)}`
+  }
+  return ""
+}
+const getYr = ds => {
+  if (!ds) return ""
+  const p = ds.split("-")
+  return p.length === 3 ? p[0].slice(-2) : ""
+}
 const cDur = (s, e) => {
   if (!s || !e) return ""
   const [sh, sm] = s.split(":").map(Number)
@@ -67,7 +89,15 @@ const cDur = (s, e) => {
   let d = (eh * 60 + em) - (sh * 60 + sm)
   return d < 0 ? d + 1440 : d
 }
-const getDN = ds => ds ? new Date(ds).toLocaleString("es", { weekday: "short" }) : ""
+const getDN = ds => {
+  if (!ds) return ""
+  const p = ds.split("-")
+  if (p.length === 3) {
+    const d = new Date(parseInt(p[0]), parseInt(p[1]) - 1, parseInt(p[2]))
+    return d.toLocaleString("es", { weekday: "short" })
+  }
+  return ""
+}
 const isSO = t => t.resultado === "SIN OP" || t.setup === "NO"
 const rT = ts => ts.filter(t => !isSO(t))
 
@@ -152,7 +182,7 @@ function cS(trades) {
   const exp = Math.round((tR / t2.length) * 100) / 100
 
   let mxW = 0, mxL = 0, cW = 0, cL = 0
-  const sorted = [...t2].sort((a, b2) => new Date(a.fecha) - new Date(b2.fecha))
+  const sorted = [...t2].sort((a, b2) => safeDate(a.fecha) - safeDate(b2.fecha))
   sorted.forEach(t => {
     const r = gR(t)
     if (r > 0) { cW++; cL = 0 }
@@ -284,20 +314,6 @@ function atrAnalysis(trades) {
   return [[0, 10, "0-10"], [10, 15, "10-15"], [15, 20, "15-20"], [20, 25, "20-25"], [25, 30, "25-30"], [30, 40, "30-40"], [40, 999, "40+"]]
     .map(([lo, hi, label]) => ({ range: label, ...cS(rT(trades).filter(t => { const a = pn(t.atr); return a > lo && a <= hi })) }))
     .filter(x => x.total > 0)
-}
-
-function suggestions(trades){
-  if(trades.length<5)return[]
-  const t=[],s=cS(trades)
-  if(s.winRate>=50)t.push({type:"green",text:`Win rate: ${s.winRate.toFixed(2)}%`})
-  else t.push({type:"red",text:`Win rate bajo: ${s.winRate.toFixed(2)}%`})
-  if(s.profitFactor>=1.5)t.push({type:"green",text:`PF: ${fmtPF(s.profitFactor)}`})
-  if(s.maxLossStreak>=3)t.push({type:"red",text:`Racha loss max: ${s.maxLossStreak}`})
-  if(s.recoveryFactor!==Infinity&&s.recoveryFactor>0)t.push({type:s.recoveryFactor>=2?"green":"yellow",text:`Recovery: ${s.recoveryFactor.toFixed(2)}`})
-  if(s.sharpeRatio!==0)t.push({type:s.sharpeRatio>=1?"green":"yellow",text:`Sharpe: ${s.sharpeRatio.toFixed(2)}`})
-  if(s.avgDurWin)t.push({type:"blue",text:`Duracion WIN=${s.avgDurWin}m SL=${s.avgDurSL}m`})
-  if(!s.sampleValid)t.push({type:"yellow",text:`${s.total}/30 trades para stats confiables`})
-  return t
 }
 
 function slAnalysis(trades) {
@@ -481,12 +497,9 @@ function parseNT8CSV(csvText) {
     }
   })
 
-return trades
-  }
+  return trades
+}
 
-// ═══════════════════════════════════════════════
-// PARTE 2: COMPONENTS + MODALS + MAIN APP LOGIC
-// ═══════════════════════════════════════════════
 
 // ── Small UI Components ──
 const TP = ({ value, onChange, label }) => (
@@ -523,7 +536,7 @@ const BTag = ({ b }) => (
 const EC = ({ trades: ts }) => {
   const t2 = rT(ts)
   if (t2.length < 2) return <div className="em">Min 2 trades</div>
-  const sorted = [...t2].sort((a, b) => new Date(a.fecha) - new Date(b.fecha))
+  const sorted = [...t2].sort((a, b) => safeDate(a.fecha) - safeDate(b.fecha))
   let cum = 0
   const pts = [0, ...sorted.map(t => (cum += gR(t), Math.round(cum * 100) / 100))]
   const mn = Math.min(...pts), mx = Math.max(...pts), rng = mx - mn || 1
@@ -1022,11 +1035,11 @@ function MainApp({ user, onLogout }) {
     if (fN) ft = ft.slice(0, parseInt(fN) || ft.length)
     if (fP !== "all") {
       const now = new Date()
-      if (fP === "week") { const w = new Date(now - 7 * 864e5); ft = ft.filter(t => new Date(t.fecha) >= w) }
-      else if (fP === "month") ft = ft.filter(t => { const d = new Date(t.fecha); return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear() })
-      else if (fP === "year") ft = ft.filter(t => new Date(t.fecha).getFullYear() === now.getFullYear())
+      if (fP === "week") { const w = new Date(now - 7 * 864e5); ft = ft.filter(t => safeDate(t.fecha) >= w) }
+      else if (fP === "month") ft = ft.filter(t => { const d = safeDate(t.fecha); return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear() })
+      else if (fP === "year") ft = ft.filter(t => safeDate(t.fecha).getFullYear() === now.getFullYear())
     }
-    return ft.sort((a, b) => new Date(b.fecha) - new Date(a.fecha))
+    return ft.sort((a, b) => safeDate(b.fecha) - safeDate(a.fecha))
   }, [trades, fP, fS, fN, fd1, fd2])
 
   const stats = useMemo(() => cS(filtered), [filtered])
@@ -1040,7 +1053,7 @@ function MainApp({ user, onLogout }) {
   const hStats = useMemo(() => hourAnalysis(filtered), [filtered])
   const atrStats = useMemo(() => atrAnalysis(filtered), [filtered])
   const slStats = useMemo(() => slAnalysis(filtered), [filtered])
-  const tipsData = useMemo(() => suggestions(filtered), [filtered])
+  const tipsData = useMemo(() => genTips(filtered), [filtered])
 
   const isSinOpForm = isSO(form)
   const isWin = form.resultado === "WIN"
@@ -1108,7 +1121,7 @@ function MainApp({ user, onLogout }) {
     const bd = {}
     trades.forEach(t => {
       if (!t.fecha) return
-      const d = new Date(t.fecha)
+      const d = safeDate(t.fecha)
       if (d.getMonth() === calMonth && d.getFullYear() === calYear) {
         const day = d.getDate()
         if (!bd[day]) bd[day] = []
@@ -1138,7 +1151,7 @@ function MainApp({ user, onLogout }) {
 
   const monthTrades = trades.filter(t => {
     if (!t.fecha) return false
-    const d = new Date(t.fecha)
+    const d = safeDate(t.fecha)
     return d.getMonth() === calMonth && d.getFullYear() === calYear
   })
   const monthR = Math.round(rT(monthTrades).reduce((a, t) => a + gR(t), 0) * 100) / 100
@@ -1151,9 +1164,8 @@ function MainApp({ user, onLogout }) {
     </div>
   }
 
-    // ═══════════════════════════════════════════════
-  // PARTE 3: RENDER JSX
-  // ═══════════════════════════════════════════════
+  // ── RENDER empieza en PARTE 3 ──
+
 
   return (
     <>
