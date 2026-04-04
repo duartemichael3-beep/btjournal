@@ -25,7 +25,7 @@ const getMo=ds=>ds?new Date(ds).toLocaleString("es",{month:"short"})+" "+String(
 const getYr=ds=>ds?String(new Date(ds).getFullYear()).slice(-2):""
 const cDur=(s,e)=>{if(!s||!e)return"";const[sh,sm]=s.split(":").map(Number),[eh,em]=e.split(":").map(Number);let d=(eh*60+em)-(sh*60+sm);return d<0?d+1440:d}
 const getDN=ds=>ds?new Date(ds).toLocaleString("es",{weekday:"short"}):""
-const gR=t=>{if(t.resultado==="BE")return 0;const rv=pn(t.rResultado);if(t.resultado==="SL")return rv<0?rv:-1;return rv>0?rv:0}
+const gR=t=>t.resultado==="SL"?-1:t.resultado==="BE"?0:pn(t.rResultado)>0?pn(t.rResultado):0
 const gDD=t=>{const s=pn(t.puntosSlStr),d=pn(t.ddPuntos);return s&&d?Math.round(d/s*10000)/100:null}
 const hBucket=h=>{if(!h||!h.includes(":"))return"";const[hh,mm]=h.split(":").map(Number);return`${String(hh).padStart(2,"0")}:${String(Math.floor(mm/5)*5).padStart(2,"0")}`}
 
@@ -39,115 +39,91 @@ function parseNT8CSV(csvText){
   const hdr=lines[0].split(",").map(h=>h.trim())
   const iInst=hdr.indexOf("Instrument"),iAction=hdr.indexOf("Action"),iQty=hdr.indexOf("Quantity")
   const iPrice=hdr.indexOf("Price"),iTime=hdr.indexOf("Time"),iEX=hdr.indexOf("E/X")
+  const iOrderId=hdr.indexOf("Order ID")
   if(iAction<0||iQty<0||iPrice<0||iTime<0||iEX<0)return[]
 
-  // Parse rows
-  let rows=lines.slice(1).map(line=>{
+  // Parse all rows
+  const rows=lines.slice(1).map(line=>{
     const vs=line.split(",").map(v=>v.trim())
-    return{instrument:vs[iInst]||"",action:vs[iAction]||"",qty:parseInt(vs[iQty])||0,price:parseFloat(vs[iPrice])||0,time:vs[iTime]||"",ex:(vs[iEX]||"").trim()}
+    return{instrument:vs[iInst]||"",action:vs[iAction]||"",qty:parseInt(vs[iQty])||0,price:parseFloat(vs[iPrice])||0,time:vs[iTime]||"",ex:(vs[iEX]||"").trim(),orderId:vs[iOrderId]||""}
   }).filter(r=>r.action&&r.qty&&r.price&&r.time)
 
-  // Deduplicate
-  const seen=new Set()
-  rows=rows.filter(r=>{const k=`${r.time}|${r.action}|${r.qty}|${r.price}|${r.ex}`;if(seen.has(k))return false;seen.add(k);return true})
-
-  // Sort by time
-  rows.sort((a,b)=>{const ta=parseNT8Time(a.time),tb=parseNT8Time(b.time);return(ta||0)-(tb||0)})
-
-  // Helper to build a trade object
-  const makeTrade=(is_buy,ep,eq,inst,entryTime,exits)=>{
-    const mult=getMultiplier(inst)
-    const txq=exits.reduce((a,e)=>a+e.qty,0)
-    const wavg=exits.reduce((a,e)=>a+e.price*e.qty,0)/txq
-    const exitTime=parseNT8Time(exits[exits.length-1].time)
-    const c=Math.min(eq,txq)
-    const pts=is_buy?wavg-ep:ep-wavg
-    const ptsR=Math.round(pts*100)/100
-    const dollar=ptsR*c*mult
-    const rVal=Math.round(dollar/RV*100)/100
-    const eDate=parseNT8Time(entryTime)
-    const fecha=eDate?`${eDate.getFullYear()}-${String(eDate.getMonth()+1).padStart(2,"0")}-${String(eDate.getDate()).padStart(2,"0")}`:""
-    const hi=eDate?`${String(eDate.getHours()).padStart(2,"0")}:${String(eDate.getMinutes()).padStart(2,"0")}`:""
-    const hf=exitTime?`${String(exitTime.getHours()).padStart(2,"0")}:${String(exitTime.getMinutes()).padStart(2,"0")}`:""
-    let resultado,rResultado
-    if(dollar>5){resultado="WIN";rResultado=String(Math.round(Math.abs(rVal)*100)/100)}
-    else if(dollar<-5){resultado="SL";rResultado=String(Math.round(rVal*100)/100)}
-    else{resultado="BE";rResultado="0"}
-    return{...DFT,fecha,horaInicio:hi,horaFinal:hf,duracionTrade:String(cDur(hi,hf)||""),buySell:is_buy?"BUY":"SELL",puntosSlStr:String(Math.abs(ptsR)),rResultado,rMaximo:"",resultado,notas:`NT8: ${inst} ${c}ct @ ${ep}→${Math.round(wavg*100)/100} = ${ptsR}pts ${fmt$(Math.round(dollar))} (${rVal}R)`}
-  }
-
-  // ═══ PASS 1: Standard Entry → opposite Exit matching ═══
-  const used=new Set()
+  // Group by order: entries and exits
+  // An "Entry" row starts a position, "Exit" rows close it
+  // We'll match by looking at sequential Entry->Exit groups
   const trades=[]
   let i=0
   while(i<rows.length){
     const r=rows[i]
-    if(r.ex!=="Entry"){i++;continue}
-    const isBuy=r.action==="Buy"
-    const eq=r.qty,ep=r.price,inst=r.instrument
-    const exits=[]
-    let exitQty=0,j=i+1
-    while(j<rows.length&&exitQty<eq){
-      const nr=rows[j]
-      if(nr.ex==="Exit"){
-        const isOpp=(isBuy&&nr.action==="Sell")||(!isBuy&&nr.action==="Buy")
-        if(isOpp){exits.push({idx:j,...nr});exitQty+=nr.qty}else break
-      }else if(nr.ex==="Entry")break
-      j++
+    if(r.ex==="Entry"){
+      const entryRow=r
+      const entryQty=entryRow.qty
+      const entryPrice=entryRow.price
+      const entrySide=entryRow.action // Buy or Sell
+      const instrument=entryRow.instrument
+      const mult=getMultiplier(instrument)
+      // Collect subsequent exits until position is flat
+      const exits=[]
+      let exitQty=0
+      let j=i+1
+      while(j<rows.length&&exitQty<entryQty){
+        if(rows[j].ex==="Exit"){
+          exits.push(rows[j])
+          exitQty+=rows[j].qty
+        }else{
+          break // next entry starts
+        }
+        j++
+      }
+      if(exits.length>0){
+        // Weighted average exit price
+        const totalExitQty=exits.reduce((a,e)=>a+e.qty,0)
+        const avgExitPrice=exits.reduce((a,e)=>a+e.price*e.qty,0)/totalExitQty
+        // Calculate P&L
+        const isBuy=entrySide==="Buy"
+        const points=isBuy?avgExitPrice-entryPrice:entryPrice-avgExitPrice
+        const pointsRound=Math.round(points*100)/100
+        const contracts=entryQty
+        const dollarPL=pointsRound*contracts*mult
+        const rValue=Math.round(dollarPL/RV*100)/100
+
+        // Parse entry time
+        const entryDate=parseNT8Time(entryRow.time)
+        const lastExit=exits[exits.length-1]
+        const exitDate=parseNT8Time(lastExit.time)
+
+        const fecha=entryDate?`${entryDate.getFullYear()}-${String(entryDate.getMonth()+1).padStart(2,"0")}-${String(entryDate.getDate()).padStart(2,"0")}`:""
+        const horaInicio=entryDate?`${String(entryDate.getHours()).padStart(2,"0")}:${String(entryDate.getMinutes()).padStart(2,"0")}`:""
+        const horaFinal=exitDate?`${String(exitDate.getHours()).padStart(2,"0")}:${String(exitDate.getMinutes()).padStart(2,"0")}`:""
+        const dur=cDur(horaInicio,horaFinal)
+
+        // Determine resultado
+        let resultado="WIN",rResultado=String(Math.abs(rValue)),rMaximo=""
+        if(dollarPL<=-RV*0.8){resultado="SL";rResultado="-1"}
+        else if(Math.abs(dollarPL)<RV*0.15){resultado="BE";rResultado="0"}
+        else if(dollarPL<0){resultado="SL";rResultado="-1"}
+
+        trades.push({
+          ...DFT,
+          fecha,
+          horaInicio,
+          horaFinal,
+          duracionTrade:String(dur||""),
+          buySell:isBuy?"BUY":"SELL",
+          puntosSlStr:String(Math.abs(pointsRound)),
+          rResultado:resultado==="WIN"?String(Math.round(rValue*100)/100):resultado==="SL"?"-1":"0",
+          rMaximo:"",
+          resultado,
+          notas:`NT8: ${instrument} ${contracts}ct @ ${entryPrice}→${Math.round(avgExitPrice*100)/100} = ${pointsRound}pts ${fmt$(Math.round(dollarPL))} (${rValue}R)`
+        })
+        i=j
+      }else{
+        i++
+      }
+    }else{
+      i++
     }
-    if(exits.length){
-      trades.push(makeTrade(isBuy,ep,eq,inst,r.time,exits))
-      used.add(i);exits.forEach(e=>used.add(e.idx))
-      i=exits[exits.length-1].idx+1
-    }else{i++}
   }
-
-  // ═══ PASS 2: Match leftover entries with orphan exits on SAME DAY ═══
-  const unmatched=rows.map((r,idx)=>({idx,...r})).filter(r=>!used.has(r.idx)&&r.ex==="Entry")
-  const orphans=rows.map((r,idx)=>({idx,...r})).filter(r=>!used.has(r.idx)&&r.ex==="Exit")
-
-  // Group unmatched entries by date+direction
-  const entryGroups={}
-  unmatched.forEach(r=>{
-    const d=parseNT8Time(r.time);if(!d)return
-    const k=`${d.getFullYear()}${String(d.getMonth()+1).padStart(2,"0")}${String(d.getDate()).padStart(2,"0")}|${r.action}`
-    ;(entryGroups[k]??=[]).push(r)
-  })
-  // Group orphan exits by date+direction
-  const exitGroups={}
-  orphans.forEach(r=>{
-    const d=parseNT8Time(r.time);if(!d)return
-    const k=`${d.getFullYear()}${String(d.getMonth()+1).padStart(2,"0")}${String(d.getDate()).padStart(2,"0")}|${r.action}`
-    ;(exitGroups[k]??=[]).push(r)
-  })
-  const used2=new Set()
-  Object.entries(entryGroups).forEach(([ekey,entries])=>{
-    const[dateStr,eAction]=ekey.split("|")
-    const isBuy=eAction==="Buy"
-    const xkey=`${dateStr}|${isBuy?"Sell":"Buy"}`
-    const availExits=(exitGroups[xkey]||[]).filter(x=>!used2.has(x.idx))
-    if(!availExits.length)return
-    const totalEQ=entries.reduce((a,e)=>a+e.qty,0)
-    const wavgEP=entries.reduce((a,e)=>a+e.price*e.qty,0)/totalEQ
-    const inst=entries[0].instrument
-    const et=parseNT8Time(entries[0].time)
-    if(!et)return
-    // Find exits after entry time
-    const matchedExits=[]
-    let mq=0
-    availExits.sort((a,b)=>(parseNT8Time(a.time)||0)-(parseNT8Time(b.time)||0))
-    for(const ex of availExits){
-      const xt=parseNT8Time(ex.time);if(!xt||xt<et)continue
-      // Same session check (<8h)
-      if((xt-et)/1000>8*3600)continue
-      matchedExits.push(ex);mq+=ex.qty
-      if(mq>=totalEQ)break
-    }
-    if(!matchedExits.length)return
-    trades.push(makeTrade(isBuy,wavgEP,totalEQ,inst,entries[0].time,matchedExits))
-    matchedExits.forEach(x=>used2.add(x.idx))
-  })
-
   return trades
 }
 
@@ -258,28 +234,19 @@ const ModeToggle=({mode,setMode})=>(
 // ═══ NT8 IMPORT MODAL ═══
 function NT8ImportModal({onImport,onClose}){
   const[preview,setPreview]=useState(null)
+  const[csvText,setCsvText]=useState("")
   const[importing,setImporting]=useState(false)
-  const[fileCount,setFileCount]=useState(0)
 
-  const handleFiles=async e=>{
-    const files=Array.from(e.target.files||[])
-    if(!files.length)return
-    setFileCount(files.length)
-    // Read all files and merge rows
-    const allTexts=await Promise.all(files.map(f=>new Promise((res,rej)=>{const r=new FileReader();r.onload=ev=>res(ev.target.result);r.onerror=rej;r.readAsText(f)})))
-    // Merge: take header from first file, data rows from all
-    const allLines=[]
-    let header=""
-    allTexts.forEach((text,idx)=>{
-      const lines=text.replace(/\r/g,"").split("\n").filter(l=>l.trim())
-      if(lines.length<2)return
-      if(!header)header=lines[0]
-      allLines.push(...lines.slice(1))
-    })
-    if(!header||!allLines.length){setPreview([]);return}
-    const merged=header+"\n"+allLines.join("\n")
-    const parsed=parseNT8CSV(merged)
-    setPreview(parsed)
+  const handleFile=e=>{
+    const f=e.target.files[0];if(!f)return
+    const reader=new FileReader()
+    reader.onload=ev=>{
+      const text=ev.target.result
+      setCsvText(text)
+      const parsed=parseNT8CSV(text)
+      setPreview(parsed)
+    }
+    reader.readAsText(f)
   }
 
   const doImport=async()=>{
@@ -296,36 +263,34 @@ function NT8ImportModal({onImport,onClose}){
         <h2 style={{fontSize:18,fontWeight:700,color:"var(--purple)",fontFamily:"var(--mono)"}}>Importar NT8</h2>
         <button className="btn bo bx" onClick={onClose}>✕</button>
       </div>
-      <p style={{fontSize:12,color:"var(--text2)",marginBottom:16}}>Sube uno o varios CSVs de ejecuciones de NinjaTrader 8. Puedes seleccionar multiples archivos a la vez. La app agrupara Entry + Exit, calculara P&L y R automaticamente.</p>
+      <p style={{fontSize:12,color:"var(--text2)",marginBottom:16}}>Sube el CSV de ejecuciones de NinjaTrader 8. La app agrupara Entry + Exit, calculara P&L y R automaticamente.</p>
       <div style={{marginBottom:16}}>
-        <input type="file" accept=".csv" multiple onChange={handleFiles} style={{fontSize:12,color:"var(--text)"}}/>
+        <input type="file" accept=".csv" onChange={handleFile} style={{fontSize:12,color:"var(--text)"}}/>
       </div>
       {preview&&<>
-        <div style={{marginBottom:12,padding:"10px 14px",background:"var(--gd)",borderRadius:8,display:"flex",gap:16,alignItems:"center"}}>
+        <div style={{marginBottom:12,padding:"10px 14px",background:"var(--gd)",borderRadius:8}}>
           <span style={{fontFamily:"var(--mono)",fontSize:13,color:"var(--green)",fontWeight:700}}>{preview.length} trades detectados</span>
-          {fileCount>1&&<span style={{fontFamily:"var(--mono)",fontSize:11,color:"var(--text3)"}}>{fileCount} archivos</span>}
         </div>
-        {(()=>{const w=preview.filter(t=>t.resultado==="WIN"),l=preview.filter(t=>t.resultado==="SL"),b=preview.filter(t=>t.resultado==="BE");const pnl=preview.reduce((a,t)=>{const r=gR(t);return a+r},0);return<div style={{display:"flex",gap:12,marginBottom:12,flexWrap:"wrap"}}><div style={{background:"var(--surface2)",borderRadius:8,padding:"8px 14px"}}><span style={{fontFamily:"var(--mono)",fontSize:11,color:"var(--text3)"}}>P&L </span><span style={{fontFamily:"var(--mono)",fontSize:13,fontWeight:700,color:pnl>=0?"var(--green)":"var(--red)"}}>{fmt$(Math.round(pnl*RV))}</span></div><div style={{background:"var(--surface2)",borderRadius:8,padding:"8px 14px"}}><span style={{fontFamily:"var(--mono)",fontSize:11,color:"var(--green)"}}>{w.length}W </span><span style={{fontFamily:"var(--mono)",fontSize:11,color:"var(--red)"}}>{l.length}L </span><span style={{fontFamily:"var(--mono)",fontSize:11,color:"var(--yellow)"}}>{b.length}BE</span></div><div style={{background:"var(--surface2)",borderRadius:8,padding:"8px 14px"}}><span style={{fontFamily:"var(--mono)",fontSize:11,color:"var(--text3)"}}>Win% </span><span style={{fontFamily:"var(--mono)",fontSize:13,fontWeight:700,color:w.length/preview.length>=.5?"var(--green)":"var(--red)"}}>{(w.length/preview.length*100).toFixed(2)}%</span></div></div>})()}
-        <div style={{overflowX:"auto",marginBottom:16,maxHeight:300,overflowY:"auto"}}>
-          <table className="tbl"><thead><tr><th>Fecha</th><th>Hora</th><th>B/S</th><th>Pts</th><th>P&L</th><th>R</th><th>Resultado</th></tr></thead>
-          <tbody>{preview.slice(0,30).map((t,i)=>{const r=gR(t);return<tr key={i}>
+        <div style={{overflowX:"auto",marginBottom:16}}>
+          <table className="tbl"><thead><tr><th>Fecha</th><th>Hora</th><th>B/S</th><th>SL pts</th><th>R</th><th>Resultado</th><th>Notas</th></tr></thead>
+          <tbody>{preview.slice(0,20).map((t,i)=>{const r=gR(t);return<tr key={i}>
             <td className="mono">{fmtD(t.fecha)}</td>
             <td className="mono" style={{fontSize:10}}>{t.horaInicio}→{t.horaFinal}</td>
             <td><BT bs={t.buySell}/></td>
             <td className="mono">{t.puntosSlStr}</td>
-            <td className="mono bold" style={{color:r>0?"var(--green)":r<0?"var(--red)":"var(--yellow)"}}>{fmt$(Math.round(r*RV))}</td>
             <td className="mono bold" style={{color:r>0?"var(--green)":r<0?"var(--red)":"var(--yellow)"}}>{fmtR(r)}</td>
             <td><RT res={t.resultado}/></td>
+            <td style={{fontSize:9,color:"var(--text3)",maxWidth:200,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{t.notas}</td>
           </tr>})}</tbody></table>
-          {preview.length>30&&<div style={{fontSize:11,color:"var(--text3)",textAlign:"center",padding:8}}>...y {preview.length-30} mas</div>}
+          {preview.length>20&&<div style={{fontSize:11,color:"var(--text3)",textAlign:"center",padding:8}}>...y {preview.length-20} mas</div>}
         </div>
         <p style={{fontSize:11,color:"var(--text3)",marginBottom:12}}>Despues de importar puedes editar cada trade para agregar setup, contexto, noticias, etc.</p>
         <div style={{display:"flex",gap:8}}>
-          <button className="btn bp" onClick={doImport} disabled={importing}>{importing?"Importando...":`Importar ${preview.length} trades`}</button>
+          <button className="btn bp" onClick={doImport} disabled={importing}>{importing?"Importando...":` Importar ${preview.length} trades`}</button>
           <button className="btn bo" onClick={onClose}>Cancelar</button>
         </div>
       </>}
-      {!preview&&<div className="em">Selecciona uno o mas CSVs de NinjaTrader 8</div>}
+      {!preview&&<div className="em">Selecciona un CSV de NinjaTrader 8</div>}
     </div>
   </div>
 }
@@ -431,8 +396,8 @@ function MainApp({user,onLogout}){
     if(!form.fecha)return alert("Fecha obligatoria")
     setSaving(true)
     const t={...form,semana:String(wom(form.fecha)),duracionTrade:String(cDur(form.horaInicio,form.horaFinal)||"")}
-    if(appMode==="bt"){if(t.resultado==="SL")t.rResultado="-1";if(t.resultado==="BE")t.rResultado="0"}
-    else{if(t.resultado==="BE")t.rResultado="0";if(t.resultado==="SL"&&!pn(t.rResultado))t.rResultado="-1"}
+    if(t.resultado==="SL")t.rResultado="-1"
+    if(t.resultado==="BE")t.rResultado="0"
     try{
       if(editId){
         await supa(`trades?id=eq.${editId}`,{method:"PATCH",body:JSON.stringify(tradeToDb(t,user.id,appMode))})
@@ -469,20 +434,6 @@ function MainApp({user,onLogout}){
       }catch(er){alert("Error importando: "+er.message)}finally{setSaving(false)}
     }
     reader.readAsText(f)
-  }
-
-  // Delete all trades for current mode
-  const deleteAllMode=async()=>{
-    const count=trades.length
-    if(!count)return alert("No hay trades en "+modeLabel)
-    if(!confirm(`Borrar los ${count} trades de ${modeLabel}?`))return
-    if(!confirm(`CONFIRMAR: Esto eliminara ${count} trades de ${modeLabel} permanentemente.`))return
-    setSaving(true)
-    try{
-      await supa(`trades?user_id=eq.${user.id}&mode=eq.${appMode}`,{method:"DELETE"})
-      await loadTrades()
-      alert(`${count} trades de ${modeLabel} eliminados`)
-    }catch(e){alert("Error: "+e.message)}finally{setSaving(false)}
   }
 
   // NT8 Import handler
@@ -545,42 +496,41 @@ function MainApp({user,onLogout}){
         <button onClick={exportCSV}>Exportar CSV</button>
         <label>Importar CSV<input type="file" accept=".csv" onChange={importCSV} style={{display:"none"}}/></label>
         {appMode==="journal"&&<button onClick={()=>setShowNT8(true)} style={{color:"var(--purple)",borderColor:"var(--pd)",background:"var(--pd)"}}>Importar NT8</button>}
-        {trades.length>0&&<button onClick={deleteAllMode} style={{color:"var(--red)",borderColor:"var(--rd)",background:"var(--rd)",fontSize:10}}>Borrar {trades.length} trades {modeLabel}</button>}
         <button onClick={()=>{localStorage.removeItem("btj_user");onLogout()}} style={{color:"var(--red)"}}>Cerrar sesion</button>
       </div>
     </div>
     <div className={`main ${!sb||window.innerWidth<=900?"full":""}`}>
     {saving&&<div style={{position:"fixed",top:60,right:20,background:"var(--ad)",color:"var(--accent)",padding:"8px 16px",borderRadius:8,fontFamily:"var(--mono)",fontSize:12,zIndex:999}}>Guardando...</div>}
 
-{tab==="dashboard"&&<><div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:20,flexWrap:"wrap",gap:10}}><div><h1 className="pt">Dashboard <span style={{fontSize:16,fontFamily:"var(--mono)",color:accentColor,fontWeight:600}}>{modeLabel}</span></h1><p className="ps">{trades.length} trades | 1R={fmt$(RV)}</p></div><Filters/></div>
+{tab==="dashboard"&&<><div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:20,flexWrap:"wrap",gap:10}}><div><h1 className="pt">Dashboard <span style={{fontSize:13,fontFamily:"var(--mono)",color:accentColor,fontWeight:600}}>{modeLabel}</span></h1><p className="ps">{trades.length} trades | 1R={fmt$(RV)}</p></div><Filters/></div>
 <div className="metrics"><MC label="P&L" value={`${stats.totalR>=0?"+":""}${stats.totalR}R`} sub={fmt$(stats.totalDollar)} color={stats.totalR>=0?"var(--green)":"var(--red)"} big/><MC label="Win rate" value={`${stats.winRate.toFixed(2)}%`} color={stats.winRate>=50?"var(--green)":"var(--red)"} sub={`${stats.wins}W|${stats.losses}L|${stats.bes}BE`}/><MC label="PF" value={fmtPF(stats.profitFactor)} color={stats.profitFactor>=1.5?"var(--green)":stats.profitFactor>=1?"var(--yellow)":"var(--red)"}/><MC label="Expectancy" value={`${stats.expectancy}R`} color={stats.expectancy>0?"var(--green)":"var(--red)"} sub={fmt$(stats.expectDollar)+"/trade"}/><MC label="Sharpe" value={stats.sharpeRatio.toFixed(2)} color={stats.sharpeRatio>=1?"var(--green)":stats.sharpeRatio>=.5?"var(--yellow)":"var(--red)"}/><MC label="Recovery" value={stats.recoveryFactor===Infinity?"∞":stats.recoveryFactor.toFixed(2)} color={stats.recoveryFactor>=2?"var(--green)":"var(--yellow)"} sub={`MaxDD:${stats.maxEquityDD||0}R`}/><MC label="Payoff" value={stats.payoffRatio===Infinity?"∞":stats.payoffRatio.toFixed(2)} color={stats.payoffRatio>=2?"var(--green)":"var(--yellow)"}/><MC label="Trades" value={stats.total} sub={stats.sampleValid?"Muestra OK":"Min 30"} color={stats.sampleValid?"var(--green)":"var(--yellow)"}/></div>
 <div className="card"><div className="st">Resumen</div><div className="info-grid"><div className="info-item"><div className="ml">Dia + ganador</div><div className="val" style={{color:"var(--green)"}}>{extra.bestDay}</div></div><div className="info-item"><div className="ml">Dia + perdedor</div><div className="val" style={{color:"var(--red)"}}>{extra.worstDay}</div></div><div className="info-item"><div className="ml">Ops/dia</div><div className="val">{extra.avgOps}</div></div><div className="info-item"><div className="ml">Mejor dia sem</div><div className="val" style={{color:"var(--green)"}}>{extra.bestWd}</div></div><div className="info-item"><div className="ml">Peor dia sem</div><div className="val" style={{color:"var(--red)"}}>{extra.worstWd}</div></div><div className="info-item"><div className="ml">Racha WIN</div><div className="val" style={{color:"var(--green)"}}>{stats.maxWinStreak}{stats.curWinStreak>1?` (now:${stats.curWinStreak})`:""}</div></div><div className="info-item"><div className="ml">Racha LOSS</div><div className="val" style={{color:"var(--red)"}}>{stats.maxLossStreak}{stats.curLossStreak>1?` (now:${stats.curLossStreak})`:""}</div></div><div className="info-item"><div className="ml">Dur WIN/SL/BE</div><div className="val">{stats.avgDurWin}/{stats.avgDurSL}/{stats.avgDurBE}min</div></div></div></div>
 <div className="g2" style={{marginBottom:14}}><div className="card"><div className="st">Equity</div><EC trades={filtered}/></div><div className="card"><div className="st">Resultados</div><div style={{display:"flex",gap:20,flexWrap:"wrap"}}>{[["WIN",stats.wins,"var(--green)"],["SL",stats.losses,"var(--red)"],["BE",stats.bes,"var(--yellow)"]].map(([l,v,c])=><div key={l} style={{textAlign:"center"}}><div style={{fontSize:26,fontWeight:700,fontFamily:"var(--mono)",color:c}}>{stats.total?Math.round(v/stats.total*10000)/100:0}%</div><div style={{fontSize:10,color:"var(--text3)",fontFamily:"var(--mono)"}}>{l}({v})</div></div>)}</div></div></div>
 <div className="card"><div className="st">P&L diario</div><BC data={daily.slice(0,20).reverse().map(d=>d.totalR)} labels={daily.slice(0,20).reverse().map(d=>fmtD(d.key))} unit="R"/></div>
 <div className="card"><div className="ch"><span className="st" style={{margin:0}}>Recientes</span><button className="btn bo bx" onClick={()=>setTab("trades")}>Todos</button></div><div style={{overflowX:"auto"}}><table className="tbl"><thead><tr><th>Fecha</th><th>Setup</th><th>B/S</th><th>R</th><th>Rmax</th><th>P&L</th><th>Res</th><th>DD%</th><th>Dir</th></tr></thead><tbody>{filtered.slice(0,8).map(t=>{const r=gR(t),dd=gDD(t);return<tr key={t.id} style={{cursor:"pointer"}} onClick={()=>edit(t)}><td className="mono">{fmtD(t.fecha)}</td><td><ST s={t.setup}/></td><td><BT bs={t.buySell}/></td><td className="mono bold" style={{color:r>0?"var(--green)":r<0?"var(--red)":"var(--yellow)"}}>{fmtR(r)}</td><td className="mono" style={{color:"var(--purple)"}}>{pn(t.rMaximo)>0?t.rMaximo+"R":""}</td><td className="mono bold" style={{color:r>=0?"var(--green)":"var(--red)"}}>{fmt$(r*RV)}</td><td><RT res={t.resultado}/></td><td className="mono" style={{color:"var(--purple)"}}>{dd!==null?dd+"%":""}</td><td><DT2 dir={t.direccionDia}/></td></tr>})}</tbody></table></div>{!filtered.length&&<div className="em">Sin trades en {modeLabel}</div>}</div></>}
 
-{tab==="calendario"&&<><h1 className="pt" style={{marginBottom:20}}>Calendario <span style={{fontSize:16,fontFamily:"var(--mono)",color:accentColor,fontWeight:600}}>{modeLabel}</span></h1><Calendar trades={trades} month={calMonth} year={calYear} onPrev={()=>{if(calMonth===0){setCalMonth(11);setCalYear(calYear-1)}else setCalMonth(calMonth-1)}} onNext={()=>{if(calMonth===11){setCalMonth(0);setCalYear(calYear+1)}else setCalMonth(calMonth+1)}}/></>}
+{tab==="calendario"&&<><h1 className="pt" style={{marginBottom:20}}>Calendario <span style={{fontSize:13,fontFamily:"var(--mono)",color:accentColor,fontWeight:600}}>{modeLabel}</span></h1><Calendar trades={trades} month={calMonth} year={calYear} onPrev={()=>{if(calMonth===0){setCalMonth(11);setCalYear(calYear-1)}else setCalMonth(calMonth-1)}} onNext={()=>{if(calMonth===11){setCalMonth(0);setCalYear(calYear+1)}else setCalMonth(calMonth+1)}}/></>}
 
-{tab==="trades"&&<><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16,flexWrap:"wrap",gap:10}}><h1 className="pt">Trades <span style={{fontSize:16,fontFamily:"var(--mono)",color:accentColor,fontWeight:600}}>{modeLabel}</span></h1><div style={{display:"flex",gap:6,flexWrap:"wrap",alignItems:"center"}}><Filters/><button className="btn bp bs" onClick={()=>goTab("addTrade")}>+ Nuevo</button>{appMode==="journal"&&<button className="btn bs" style={{background:"var(--pd)",color:"var(--purple)"}} onClick={()=>setShowNT8(true)}>NT8</button>}</div></div><div className="card" style={{overflowX:"auto"}}><table className="tbl" style={{minWidth:1200}}><thead><tr>{["Fecha","S","Hora","Dur","Setup","Ctx","B/S","SL","R","Rmax","P&L","Res","DD","DD%","Brk","Dir","News","M5","M15","M30","",""].map(h=><th key={h}>{h}</th>)}</tr></thead><tbody>{filtered.map(t=>{const r=gR(t),dd=gDD(t);return<tr key={t.id}><td className="mono">{fmtD(t.fecha)}</td><td className="mono">S{wom(t.fecha)}</td><td className="mono" style={{fontSize:10}}>{t.horaInicio}→{t.horaFinal}</td><td className="mono">{t.duracionTrade?t.duracionTrade+"m":""}</td><td><ST s={t.setup}/></td><td style={{fontSize:10}}>{t.contexto}</td><td><BT bs={t.buySell}/></td><td className="mono">{t.puntosSlStr}</td><td className="mono bold" style={{color:r>0?"var(--green)":r<0?"var(--red)":"var(--yellow)"}}>{fmtR(r)}</td><td className="mono" style={{color:"var(--purple)"}}>{pn(t.rMaximo)>0?t.rMaximo+"R":""}</td><td className="mono bold" style={{color:r>=0?"var(--green)":"var(--red)"}}>{fmt$(r*RV)}</td><td><RT res={t.resultado}/></td><td className="mono">{t.ddPuntos}</td><td className="mono" style={{color:"var(--purple)"}}>{dd!==null?dd+"%":""}</td><td>{t.breakRangoM30}</td><td><DT2 dir={t.direccionDia}/></td><td>{t.hayNoticia==="SI"?<span className="tag tp" style={{fontSize:8}}>{t.noticiaHora}</span>:""}</td><td className="mono">{t.m5}</td><td className="mono">{t.m15}</td><td className="mono">{t.m30}</td><td>{t.screenshot?<span style={{cursor:"pointer",color:"var(--accent)"}} onClick={()=>setViewSS(t.screenshot)}>Img</span>:""}</td><td><div style={{display:"flex",gap:3}}><button className="btn bo bx" onClick={()=>edit(t)}>E</button><button className="btn bd bx" onClick={()=>del(t.id)}>X</button></div></td></tr>})}</tbody></table>{!filtered.length&&<div className="em">Sin trades en {modeLabel}</div>}</div></>}
+{tab==="trades"&&<><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16,flexWrap:"wrap",gap:10}}><h1 className="pt">Trades <span style={{fontSize:13,fontFamily:"var(--mono)",color:accentColor,fontWeight:600}}>{modeLabel}</span></h1><div style={{display:"flex",gap:6,flexWrap:"wrap",alignItems:"center"}}><Filters/><button className="btn bp bs" onClick={()=>goTab("addTrade")}>+ Nuevo</button>{appMode==="journal"&&<button className="btn bs" style={{background:"var(--pd)",color:"var(--purple)"}} onClick={()=>setShowNT8(true)}>NT8</button>}</div></div><div className="card" style={{overflowX:"auto"}}><table className="tbl" style={{minWidth:1200}}><thead><tr>{["Fecha","S","Hora","Dur","Setup","Ctx","B/S","SL","R","Rmax","P&L","Res","DD","DD%","Brk","Dir","News","M5","M15","M30","",""].map(h=><th key={h}>{h}</th>)}</tr></thead><tbody>{filtered.map(t=>{const r=gR(t),dd=gDD(t);return<tr key={t.id}><td className="mono">{fmtD(t.fecha)}</td><td className="mono">S{wom(t.fecha)}</td><td className="mono" style={{fontSize:10}}>{t.horaInicio}→{t.horaFinal}</td><td className="mono">{t.duracionTrade?t.duracionTrade+"m":""}</td><td><ST s={t.setup}/></td><td style={{fontSize:10}}>{t.contexto}</td><td><BT bs={t.buySell}/></td><td className="mono">{t.puntosSlStr}</td><td className="mono bold" style={{color:r>0?"var(--green)":r<0?"var(--red)":"var(--yellow)"}}>{fmtR(r)}</td><td className="mono" style={{color:"var(--purple)"}}>{pn(t.rMaximo)>0?t.rMaximo+"R":""}</td><td className="mono bold" style={{color:r>=0?"var(--green)":"var(--red)"}}>{fmt$(r*RV)}</td><td><RT res={t.resultado}/></td><td className="mono">{t.ddPuntos}</td><td className="mono" style={{color:"var(--purple)"}}>{dd!==null?dd+"%":""}</td><td>{t.breakRangoM30}</td><td><DT2 dir={t.direccionDia}/></td><td>{t.hayNoticia==="SI"?<span className="tag tp" style={{fontSize:8}}>{t.noticiaHora}</span>:""}</td><td className="mono">{t.m5}</td><td className="mono">{t.m15}</td><td className="mono">{t.m30}</td><td>{t.screenshot?<span style={{cursor:"pointer",color:"var(--accent)"}} onClick={()=>setViewSS(t.screenshot)}>Img</span>:""}</td><td><div style={{display:"flex",gap:3}}><button className="btn bo bx" onClick={()=>edit(t)}>E</button><button className="btn bd bx" onClick={()=>del(t.id)}>X</button></div></td></tr>})}</tbody></table>{!filtered.length&&<div className="em">Sin trades en {modeLabel}</div>}</div></>}
 
-{tab==="addTrade"&&<><h1 className="pt" style={{marginBottom:16}}>{editId?"Editar":"Nuevo trade"} <span style={{fontSize:16,fontFamily:"var(--mono)",color:accentColor,fontWeight:600}}>{modeLabel}</span></h1>
+{tab==="addTrade"&&<><h1 className="pt" style={{marginBottom:16}}>{editId?"Editar":"Nuevo trade"} <span style={{fontSize:13,fontFamily:"var(--mono)",color:accentColor,fontWeight:600}}>{modeLabel}</span></h1>
 <div className="card"><div className="st">General</div><div className="form-grid">{F("Fecha","fecha","date")}<div className="field"><label>Semana</label><div className="af">S{autoWeek||"-"}</div></div><TP label="Hora inicio" value={form.horaInicio} onChange={setHI}/><TP label="Hora final" value={form.horaFinal} onChange={setHF}/><div className="field"><label>Duracion</label><div className="af">{autoDur?autoDur+"m":"-"}</div></div>{F("ATR","atr","number")}</div></div>
 <div className="card"><div className="st">Trade</div><div className="form-grid">{F("Setup","setup",null,SETUPS)}{F("Contexto","contexto",null,CTXS)}{F("Buy/Sell","buySell",null,["BUY","SELL"])}{F("Puntos SL","puntosSlStr","number")}{F("DD pts","ddPuntos","number")}<div className="field"><label>DD%</label><div className="af" style={{color:ddPct!==null&&ddPct>50?"var(--red)":"var(--purple)"}}>{ddPct!==null?ddPct+"%":"-"}</div></div></div></div>
-<div className="card"><div className="st">Resultado</div><div className="form-grid">{F("Resultado","resultado",null,RESS)}{(isWin||(appMode==="journal"&&form.resultado==="SL"))&&F("R ganados","rResultado","number")}{isWin&&F("R max mov","rMaximo","number")}{F("Break M30","breakRangoM30",null,["NO","SI"])}{F("Direccion","direccionDia",null,DIRS)}</div>{form.resultado==="SL"&&<p style={{marginTop:10,fontSize:12,color:"var(--red)",fontFamily:"var(--mono)"}}>{appMode==="bt"?`SL=-1R=-${fmt$(RV)}`:`SL=${pn(form.rResultado)?form.rResultado+"R="+fmt$(pn(form.rResultado)*RV):"-1R=-"+fmt$(RV)}`}</p>}{form.resultado==="BE"&&<p style={{marginTop:10,fontSize:12,color:"var(--yellow)",fontFamily:"var(--mono)"}}>BE=0R</p>}{isWin&&pn(form.rResultado)>0&&<p style={{marginTop:10,fontSize:12,color:"var(--green)",fontFamily:"var(--mono)"}}>+{form.rResultado}R=+{fmt$(pn(form.rResultado)*RV)}{pn(form.rMaximo)>0?` (max ${form.rMaximo}R)`:""}</p>}</div>
+<div className="card"><div className="st">Resultado</div><div className="form-grid">{F("Resultado","resultado",null,RESS)}{isWin&&F("R ganados","rResultado","number")}{isWin&&F("R max mov","rMaximo","number")}{F("Break M30","breakRangoM30",null,["NO","SI"])}{F("Direccion","direccionDia",null,DIRS)}</div>{form.resultado==="SL"&&<p style={{marginTop:10,fontSize:12,color:"var(--red)",fontFamily:"var(--mono)"}}>SL=-1R=-{fmt$(RV)}</p>}{form.resultado==="BE"&&<p style={{marginTop:10,fontSize:12,color:"var(--yellow)",fontFamily:"var(--mono)"}}>BE=0R</p>}{isWin&&pn(form.rResultado)>0&&<p style={{marginTop:10,fontSize:12,color:"var(--green)",fontFamily:"var(--mono)"}}>+{form.rResultado}R=+{fmt$(pn(form.rResultado)*RV)}{pn(form.rMaximo)>0?` (max ${form.rMaximo}R)`:""}</p>}</div>
 <div className="card"><div className="st">Noticias</div><div className="form-grid">{F("Noticia?","hayNoticia",null,["NO","SI"])}{form.hayNoticia==="SI"&&F("Hora","noticiaHora",null,NHS)}{form.hayNoticia==="SI"&&F("Impacto","noticiaImpacto",null,NIS)}{form.hayNoticia==="SI"&&F("Tipo","noticiaTipo",null,NTS)}</div></div>
 <div className="card"><div className="st">ORB</div><div className="form-grid" style={{gridTemplateColumns:"repeat(3,1fr)"}}>{F("M5","m5","number")}{F("M15","m15","number")}{F("M30","m30","number")}</div></div>
 <div className="card"><div className="st">Screenshot & Notas</div><div className="g2"><div><input ref={fR} type="file" accept="image/*" onChange={handleFile} style={{display:"none"}}/><div className="uz" onClick={()=>fR.current?.click()}>{form.screenshotPreview?<img src={form.screenshotPreview}/>:<span style={{fontSize:12}}>Subir img</span>}</div>{form.screenshotPreview&&<button className="btn bd bx" style={{marginTop:6}} onClick={()=>setForm(f=>({...f,screenshot:null,screenshotPreview:null}))}>Quitar</button>}</div><div className="field"><label>Notas</label><textarea className="inp" value={form.notas||""} onChange={e=>setForm(f=>({...f,notas:e.target.value}))}/></div></div></div>
 <div style={{display:"flex",gap:10}}><button className="btn bp" onClick={save} disabled={saving}>{saving?"Guardando...":editId?"Guardar":"Registrar"}</button>{editId&&<button className="btn bo" onClick={()=>{setEditId(null);setForm({...DFT});setTab("trades")}}>Cancelar</button>}</div></>}
 
-{tab==="estadisticas"&&<><h1 className="pt" style={{marginBottom:14}}>Stats <span style={{fontSize:16,fontFamily:"var(--mono)",color:accentColor,fontWeight:600}}>{modeLabel}</span></h1><div style={{marginBottom:12}}><Filters/></div>
+{tab==="estadisticas"&&<><h1 className="pt" style={{marginBottom:14}}>Stats <span style={{fontSize:13,fontFamily:"var(--mono)",color:accentColor,fontWeight:600}}>{modeLabel}</span></h1><div style={{marginBottom:12}}><Filters/></div>
 <STable title="Dia" data={daily.slice(0,30)} cols={["Fecha","N","W","L","Win%","R","P&L","PF"]} row={d=>[fmtD(d.key),d.total,[d.wins,"g"],[d.losses,"r"],[`${d.winRate.toFixed(2)}%`,d.winRate>=50?"g":"r"],[`${d.totalR>0?"+":""}${d.totalR}R`,d.totalR>=0?"g":"r",true],[fmt$(d.totalDollar),d.totalDollar>=0?"g":"r"],fmtPF(d.profitFactor)]}/>
 <STable title="Semana" data={weekly} cols={["Sem","N","Win%","R","P&L","PF"]} row={w=>[w.key,w.total,[`${w.winRate.toFixed(2)}%`,w.winRate>=50?"g":"r"],[`${w.totalR>0?"+":""}${w.totalR}R`,w.totalR>=0?"g":"r",true],[fmt$(w.totalDollar),w.totalDollar>=0?"g":"r"],fmtPF(w.profitFactor)]} chart={weekly}/>
 <STable title="Mes" data={monthly} cols={["Mes","N","Win%","R","P&L","PF"]} row={m=>[m.key,m.total,[`${m.winRate.toFixed(2)}%`,m.winRate>=50?"g":"r"],[`${m.totalR>0?"+":""}${m.totalR}R`,m.totalR>=0?"g":"r",true],[fmt$(m.totalDollar),m.totalDollar>=0?"g":"r"],fmtPF(m.profitFactor)]} chart={monthly}/>
 <STable title="Ano" data={yearly} cols={["Ano","N","Win%","R","P&L","PF"]} row={y=>[y.key,y.total,[`${y.winRate.toFixed(2)}%`,y.winRate>=50?"g":"r"],[`${y.totalR>0?"+":""}${y.totalR}R`,y.totalR>=0?"g":"r",true],[fmt$(y.totalDollar),y.totalDollar>=0?"g":"r"],fmtPF(y.profitFactor)]} chart={yearly}/></>}
 
-{tab==="setups"&&<><h1 className="pt" style={{marginBottom:14}}>Setups <span style={{fontSize:16,fontFamily:"var(--mono)",color:accentColor,fontWeight:600}}>{modeLabel}</span></h1><div className="g2" style={{marginBottom:14}}>{SETUPS.map(su=>{const s2=setupS[su];return<div key={su} className={`card sc ${s2.totalR>0?"profit":s2.total?"loss":""}`}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}><span style={{fontSize:16,fontWeight:700,color:accentColor,fontFamily:"var(--mono)"}}>{su}</span><span className="tag ta">{s2.total}</span></div><div className="g3" style={{gap:8}}>{[["Win%",`${s2.winRate.toFixed(2)}%`,s2.winRate>=50?"var(--green)":"var(--red)"],["P&L",`${s2.totalR>0?"+":""}${s2.totalR}R`,s2.totalR>=0?"var(--green)":"var(--red)"],["PF",fmtPF(s2.profitFactor),s2.profitFactor>=1.5?"var(--green)":"var(--red)"]].map(([l,v,c])=><div key={l}><div className="ml">{l}</div><div style={{fontSize:18,fontWeight:700,fontFamily:"var(--mono)",color:c}}>{v}</div></div>)}</div><div className="g3" style={{gap:8,marginTop:10,borderTop:"1px solid var(--border)",paddingTop:10}}>{[["Exp",`${s2.expectancy}R(${fmt$(s2.expectDollar)})`,s2.expectancy>=0?"var(--green)":"var(--red)"],["Best",`+${s2.bestR}R`,"var(--green)"],["DD",`${s2.avgDDpct}%`,"var(--purple)"]].map(([l,v,c])=><div key={l}><div className="ml">{l}</div><div style={{fontSize:13,fontWeight:600,fontFamily:"var(--mono)",color:c}}>{v}</div></div>)}</div></div>})}</div><div className="card"><div className="st">Win% por setup</div><BC data={SETUPS.map(s=>setupS[s].winRate)} labels={SETUPS} height={120} unit="%"/></div><div className="card"><div className="st">P&L por setup</div><BC data={SETUPS.map(s=>setupS[s].totalR)} labels={SETUPS} height={120} unit="R"/></div></>}
+{tab==="setups"&&<><h1 className="pt" style={{marginBottom:14}}>Setups <span style={{fontSize:13,fontFamily:"var(--mono)",color:accentColor,fontWeight:600}}>{modeLabel}</span></h1><div className="g2" style={{marginBottom:14}}>{SETUPS.map(su=>{const s2=setupS[su];return<div key={su} className={`card sc ${s2.totalR>0?"profit":s2.total?"loss":""}`}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}><span style={{fontSize:16,fontWeight:700,color:accentColor,fontFamily:"var(--mono)"}}>{su}</span><span className="tag ta">{s2.total}</span></div><div className="g3" style={{gap:8}}>{[["Win%",`${s2.winRate.toFixed(2)}%`,s2.winRate>=50?"var(--green)":"var(--red)"],["P&L",`${s2.totalR>0?"+":""}${s2.totalR}R`,s2.totalR>=0?"var(--green)":"var(--red)"],["PF",fmtPF(s2.profitFactor),s2.profitFactor>=1.5?"var(--green)":"var(--red)"]].map(([l,v,c])=><div key={l}><div className="ml">{l}</div><div style={{fontSize:18,fontWeight:700,fontFamily:"var(--mono)",color:c}}>{v}</div></div>)}</div><div className="g3" style={{gap:8,marginTop:10,borderTop:"1px solid var(--border)",paddingTop:10}}>{[["Exp",`${s2.expectancy}R(${fmt$(s2.expectDollar)})`,s2.expectancy>=0?"var(--green)":"var(--red)"],["Best",`+${s2.bestR}R`,"var(--green)"],["DD",`${s2.avgDDpct}%`,"var(--purple)"]].map(([l,v,c])=><div key={l}><div className="ml">{l}</div><div style={{fontSize:13,fontWeight:600,fontFamily:"var(--mono)",color:c}}>{v}</div></div>)}</div></div>})}</div><div className="card"><div className="st">Win% por setup</div><BC data={SETUPS.map(s=>setupS[s].winRate)} labels={SETUPS} height={120} unit="%"/></div><div className="card"><div className="st">P&L por setup</div><BC data={SETUPS.map(s=>setupS[s].totalR)} labels={SETUPS} height={120} unit="R"/></div></>}
 
-{tab==="avanzado"&&<><h1 className="pt" style={{marginBottom:14}}>Avanzado <span style={{fontSize:16,fontFamily:"var(--mono)",color:accentColor,fontWeight:600}}>{modeLabel}</span></h1><div style={{marginBottom:12}}><Filters/></div>
+{tab==="avanzado"&&<><h1 className="pt" style={{marginBottom:14}}>Avanzado <span style={{fontSize:13,fontFamily:"var(--mono)",color:accentColor,fontWeight:600}}>{modeLabel}</span></h1><div style={{marginBottom:12}}><Filters/></div>
 <div className="g2" style={{marginBottom:14}}><div className="card"><div className="st">R tomados</div>{rTaken.lvl.length?<><BC data={rTaken.pct} labels={rTaken.lvl} height={110} unit="%" colors={rTaken.lvl.map(()=>"var(--green)")}/><div style={{overflowX:"auto",marginTop:10}}><table className="tbl"><thead><tr><th>R</th><th>N</th><th>%</th></tr></thead><tbody>{rTaken.lvl.map((l,i)=><tr key={l}><td className="mono g bold">{l}</td><td className="mono">{rTaken.cnt[i]}</td><td className="mono">{rTaken.pct[i]}%</td></tr>)}</tbody></table></div></>:<div className="em">Sin wins</div>}</div><div className="card"><div className="st">R maximo mov</div>{rMx.lvl.length?<><BC data={rMx.pct} labels={rMx.lvl} height={110} unit="%" colors={rMx.lvl.map(()=>"var(--purple)")}/><div style={{overflowX:"auto",marginTop:10}}><table className="tbl"><thead><tr><th>Rmax</th><th>N</th><th>%</th></tr></thead><tbody>{rMx.lvl.map((l,i)=><tr key={l}><td className="mono bold" style={{color:"var(--purple)"}}>{l}</td><td className="mono">{rMx.cnt[i]}</td><td className="mono">{rMx.pct[i]}%</td></tr>)}</tbody></table></div></>:<div className="em">Sin datos Rmax</div>}</div></div>
 {rTaken.lvl.length>0&&rMx.lvl.length>0&&<div className="card"><div className="st">R tomado vs R maximo</div><div style={{overflowX:"auto"}}><table className="tbl"><thead><tr><th>Nivel</th><th>%Tomado</th><th>%Max</th><th>Diff</th></tr></thead><tbody>{[...new Set([...rTaken.lvl,...rMx.lvl])].sort((a,b)=>parseInt(a)-parseInt(b)).map(l=>{const ti=rTaken.lvl.indexOf(l),mi=rMx.lvl.indexOf(l),tp=ti>=0?rTaken.pct[ti]:0,mp=mi>=0?rMx.pct[mi]:0;return<tr key={l}><td className="mono bold">{l}</td><td className="mono g">{tp}%</td><td className="mono" style={{color:"var(--purple)"}}>{mp}%</td><td className="mono y">{mp>tp?`+${(mp-tp).toFixed(2)}%`:"-"}</td></tr>})}</tbody></table></div></div>}
 <div className="card"><div className="st">Por hora de entrada</div>{hStats.length?<><div style={{overflowX:"auto"}}><table className="tbl"><thead><tr><th>Hora</th><th>N</th><th>Win%</th><th>SL%</th><th>BE%</th><th>R</th><th>PF</th><th>Rmax avg</th></tr></thead><tbody>{hStats.map(h=><tr key={h.hour}><td className="mono bold">{h.hour}</td><td className="mono">{h.total}</td><td className={`mono ${h.winRate>=50?"g":"r"}`}>{h.winRate.toFixed(2)}%</td><td className="mono r">{h.total?Math.round(h.losses/h.total*10000)/100:0}%</td><td className="mono y">{h.total?Math.round(h.bes/h.total*10000)/100:0}%</td><td className={`mono bold ${h.totalR>=0?"g":"r"}`}>{h.totalR>0?"+":""}{h.totalR}R</td><td className="mono">{fmtPF(h.profitFactor)}</td><td className="mono" style={{color:"var(--purple)"}}>{h.avgRmax?h.avgRmax+"R":"-"}</td></tr>)}</tbody></table></div><div style={{marginTop:12}}><BC data={hStats.map(h=>h.winRate)} labels={hStats.map(h=>h.hour)} height={110} unit="%" colors={hStats.map(h=>h.winRate>=50?"var(--green)":"var(--red)")}/></div><div className="info-grid" style={{marginTop:12}}>{(()=>{if(!hStats.length)return null;const best=hStats.filter(h=>h.total>=2).reduce((a,x)=>x.totalR>a.totalR?x:a,hStats[0]);const worst=hStats.filter(h=>h.total>=2).reduce((a,x)=>x.totalR<a.totalR?x:a,hStats[0]);return<><div className="info-item"><div className="ml">Mejor hora</div><div className="val" style={{color:"var(--green)"}}>{best.hour} ({best.winRate.toFixed(2)}%WR)</div></div><div className="info-item"><div className="ml">Peor hora</div><div className="val" style={{color:"var(--red)"}}>{worst.hour} ({worst.winRate.toFixed(2)}%WR)</div></div></>})()}</div></>:<div className="em">Sin datos</div>}</div>
@@ -588,7 +538,7 @@ function MainApp({user,onLogout}){
 <div className="card"><div className="st">Por SL pts</div>{slSt.length?<div style={{overflowX:"auto"}}><table className="tbl"><thead><tr><th>SL</th><th>N</th><th>Win%</th><th>R</th><th>PF</th></tr></thead><tbody>{slSt.map(s2=><tr key={s2.range}><td className="mono bold">{s2.range}</td><td className="mono">{s2.total}</td><td className={`mono ${s2.winRate>=50?"g":"r"}`}>{s2.winRate.toFixed(2)}%</td><td className={`mono bold ${s2.totalR>=0?"g":"r"}`}>{s2.totalR>0?"+":""}{s2.totalR}R</td><td className="mono">{fmtPF(s2.profitFactor)}</td></tr>)}</tbody></table></div>:<div className="em">Sin datos</div>}</div>
 <div className="card"><div className="st">Por direccion</div><div className="g3">{DIRS.map(dir=>{const ds=cS(filtered.filter(t=>t.direccionDia===dir));return<div key={dir} style={{background:"var(--bg)",borderRadius:"var(--radius)",padding:12}}><DT2 dir={dir}/><div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6,marginTop:10}}>{[["N",ds.total],["Win%",`${ds.winRate.toFixed(2)}%`,ds.winRate>=50?"var(--green)":"var(--red)"],["R",`${ds.totalR>0?"+":""}${ds.totalR}R`,ds.totalR>=0?"var(--green)":"var(--red)"],["PF",fmtPF(ds.profitFactor)]].map(([l,v,c])=><div key={l}><div className="ml">{l}</div><div style={{fontWeight:600,fontFamily:"var(--mono)",color:c}}>{v}</div></div>)}</div></div>})}</div></div></>}
 
-{tab==="tips"&&<><h1 className="pt" style={{marginBottom:14}}>Tips <span style={{fontSize:16,fontFamily:"var(--mono)",color:accentColor,fontWeight:600}}>{modeLabel}</span></h1><p className="ps" style={{marginBottom:16}}>Basado en {filtered.length} trades</p>{tips.length?tips.map((t,i)=>{const cs={green:{bg:"rgba(0,214,143,.08)",b:"var(--green)"},red:{bg:"rgba(255,71,87,.08)",b:"var(--red)"},yellow:{bg:"rgba(255,192,72,.08)",b:"var(--yellow)"},blue:{bg:"rgba(76,154,255,.08)",b:"var(--accent)"}}[t.type]||{bg:"var(--surface2)",b:"var(--border)"};return<div key={i} className="tip-card" style={{background:cs.bg,borderLeft:`3px solid ${cs.b}`}}><div className="dot" style={{background:cs.b,width:8,height:8,borderRadius:"50%",flexShrink:0,marginTop:5}}/><span>{t.text}</span></div>}):<div className="em">Min 5 trades para tips</div>}</>}
+{tab==="tips"&&<><h1 className="pt" style={{marginBottom:14}}>Tips <span style={{fontSize:13,fontFamily:"var(--mono)",color:accentColor,fontWeight:600}}>{modeLabel}</span></h1><p className="ps" style={{marginBottom:16}}>Basado en {filtered.length} trades</p>{tips.length?tips.map((t,i)=>{const cs={green:{bg:"rgba(0,214,143,.08)",b:"var(--green)"},red:{bg:"rgba(255,71,87,.08)",b:"var(--red)"},yellow:{bg:"rgba(255,192,72,.08)",b:"var(--yellow)"},blue:{bg:"rgba(76,154,255,.08)",b:"var(--accent)"}}[t.type]||{bg:"var(--surface2)",b:"var(--border)"};return<div key={i} className="tip-card" style={{background:cs.bg,borderLeft:`3px solid ${cs.b}`}}><div className="dot" style={{background:cs.b,width:8,height:8,borderRadius:"50%",flexShrink:0,marginTop:5}}/><span>{t.text}</span></div>}):<div className="em">Min 5 trades para tips</div>}</>}
 
     </div>
   </>)
@@ -598,7 +548,7 @@ function MainApp({user,onLogout}){
 function App(){
   const[user,setUser]=useState(()=>{try{return JSON.parse(localStorage.getItem("btj_user"))}catch{return null}})
   return<>
-    <style>{`@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');:root{--bg:#0a0e14;--surface:#12171f;--surface2:#1a2030;--border:#1e2738;--border2:#2a3548;--text:#d4dae4;--text2:#8892a4;--text3:#5a6478;--accent:#4c9aff;--accent2:#2d7adf;--ad:rgba(76,154,255,.12);--green:#00d68f;--gd:rgba(0,214,143,.12);--red:#ff4757;--rd:rgba(255,71,87,.12);--yellow:#ffc048;--yd:rgba(255,192,72,.12);--purple:#a78bfa;--pd:rgba(167,139,250,.12);--font:'DM Sans',sans-serif;--mono:'JetBrains Mono',monospace;--radius:10px;--rlg:14px}*{box-sizing:border-box;margin:0;padding:0}body{background:var(--bg);color:var(--text);font-family:var(--font);font-size:14px;-webkit-font-smoothing:antialiased}::-webkit-scrollbar{width:6px;height:6px}::-webkit-scrollbar-track{background:transparent}::-webkit-scrollbar-thumb{background:var(--border2);border-radius:3px}.shell{display:flex;min-height:100vh}.sidebar{width:240px;background:var(--surface);border-right:1px solid var(--border);position:fixed;top:0;left:0;bottom:0;display:flex;flex-direction:column;z-index:100;transition:transform .25s}.sidebar.closed{transform:translateX(-240px)}.main{margin-left:240px;padding:28px 36px 60px;flex:1;min-width:0}.main.full{margin-left:0}.mobile-bar{display:none;position:fixed;top:0;left:0;right:0;height:52px;background:var(--surface);border-bottom:1px solid var(--border);z-index:101;align-items:center;padding:0 16px;justify-content:space-between}@media(max-width:900px){.mobile-bar{display:flex}.main{margin-left:0;padding:68px 16px 40px}.sidebar{transform:translateX(-240px)}.sidebar.open{transform:translateX(0)}}.overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:99}.ss-modal{position:fixed;inset:0;background:rgba(0,0,0,.9);z-index:9999;display:flex;align-items:center;justify-content:center;cursor:pointer}.ss-modal img{max-width:92vw;max-height:92vh;border-radius:var(--radius)}.sb-brand{padding:24px 20px 16px;border-bottom:1px solid var(--border)}.sb-brand h1{font-size:20px;font-weight:700;color:var(--accent);letter-spacing:-.5px}.sb-brand p{font-size:11px;color:var(--text3);margin-top:4px;font-family:var(--mono);text-transform:uppercase;letter-spacing:1px}.sb-nav{flex:1;padding:8px;display:flex;flex-direction:column;gap:1px;overflow-y:auto}.sb-btn{display:flex;align-items:center;gap:10px;width:100%;padding:9px 12px;background:transparent;color:var(--text2);border:none;cursor:pointer;font:inherit;font-size:12px;font-weight:500;border-radius:7px;transition:all .15s;text-align:left}.sb-btn:hover{background:var(--surface2);color:var(--text)}.sb-btn.active{background:var(--ad);color:var(--accent)}.sb-footer{padding:12px;border-top:1px solid var(--border);display:flex;flex-direction:column;gap:6px}.sb-footer button,.sb-footer label{display:block;width:100%;padding:8px;background:var(--surface2);border:1px solid var(--border);border-radius:7px;color:var(--text2);font:inherit;font-size:11px;font-weight:500;cursor:pointer;text-align:center}.sb-footer button:hover,.sb-footer label:hover{background:var(--border);color:var(--text)}.pt{font-size:28px;font-weight:700;letter-spacing:-.5px}.ps{color:var(--text2);font-size:13px;margin-top:2px}.st{font-size:13px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:.8px;margin-bottom:14px;font-family:var(--mono)}.card{background:var(--surface);border:1px solid var(--border);border-radius:var(--rlg);padding:20px;margin-bottom:16px}.ch{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px}.metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;margin-bottom:20px}.mc{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:14px}.ml{font-size:10px;color:var(--text3);font-weight:600;text-transform:uppercase;letter-spacing:.8px;font-family:var(--mono);margin-bottom:6px}.mv{font-size:20px;font-weight:700;font-family:var(--mono);letter-spacing:-.5px;line-height:1}.mv.big{font-size:26px}.ms{font-size:10px;color:var(--text3);margin-top:5px;font-family:var(--mono)}.tag{display:inline-block;padding:3px 8px;border-radius:5px;font-size:10px;font-weight:600;font-family:var(--mono)}.tg{background:var(--gd);color:var(--green)}.tr{background:var(--rd);color:var(--red)}.ty{background:var(--yd);color:var(--yellow)}.ta{background:var(--ad);color:var(--accent)}.tp{background:var(--pd);color:var(--purple)}.tbl{width:100%;border-collapse:collapse;font-size:12px}.tbl th{text-align:left;padding:8px 10px;border-bottom:1px solid var(--border);color:var(--text3);font-weight:600;font-size:9px;text-transform:uppercase;letter-spacing:.8px;font-family:var(--mono);white-space:nowrap}.tbl td{padding:8px 10px;border-bottom:1px solid var(--border)}.tbl tr:hover td{background:var(--surface2)}.tbl .mono{font-family:var(--mono)}.tbl .g{color:var(--green)}.tbl .r{color:var(--red)}.tbl .y{color:var(--yellow)}.tbl .bold{font-weight:600}.form-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(155px,1fr));gap:12px}.field{display:flex;flex-direction:column;gap:4px}.field label{font-size:9px;color:var(--text3);text-transform:uppercase;letter-spacing:.8px;font-weight:600;font-family:var(--mono)}.inp{background:var(--bg);border:1px solid var(--border2);border-radius:7px;color:var(--text);padding:9px 11px;font:inherit;font-size:13px;width:100%;outline:none}.inp:focus{border-color:var(--accent)}select.inp{cursor:pointer;appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%235a6478' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 10px center;padding-right:28px}textarea.inp{resize:vertical;min-height:100px}input[type="date"]::-webkit-calendar-picker-indicator{filter:invert(.6)}.btn{border:none;border-radius:7px;padding:9px 20px;font:inherit;font-size:13px;font-weight:600;cursor:pointer;transition:all .15s}.bp{background:var(--accent);color:#fff}.bp:hover{background:var(--accent2)}.bo{background:transparent;color:var(--text2);border:1px solid var(--border2)}.bo:hover{background:var(--surface2)}.bd{background:var(--rd);color:var(--red)}.bd:hover{background:var(--red);color:#fff}.bs{padding:5px 11px;font-size:11px}.bx{padding:3px 7px;font-size:10px}.pb{display:flex;gap:3px;background:var(--surface);border:1px solid var(--border);border-radius:7px;padding:2px}.pbtn{padding:5px 12px;border:none;background:transparent;color:var(--text3);font:inherit;font-size:11px;font-weight:500;cursor:pointer;border-radius:5px}.pbtn.active{background:var(--ad);color:var(--accent)}.em{text-align:center;padding:24px;color:var(--text3);font-size:12px}.g2{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:14px}.g3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}@media(max-width:700px){.g2,.g3{grid-template-columns:1fr}}.uz{border:2px dashed var(--border2);border-radius:var(--radius);padding:20px;text-align:center;cursor:pointer;color:var(--text3);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;min-height:70px}.uz:hover{border-color:var(--accent)}.uz img{max-width:100%;max-height:120px;border-radius:7px}.sc{border-left:3px solid var(--border2)}.sc.profit{border-left-color:var(--green)}.sc.loss{border-left-color:var(--red)}.af{background:var(--surface2);border:1px solid var(--border);border-radius:7px;padding:9px 11px;font-family:var(--mono);font-size:13px;color:var(--accent)}.info-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px;margin-top:14px}.info-item{background:var(--bg);border-radius:7px;padding:12px}.info-item .val{font-family:var(--mono);font-weight:600;font-size:13px;margin-top:4px}.tip-card{padding:12px 14px;border-radius:8px;margin-bottom:8px;font-size:12px;display:flex;align-items:flex-start;gap:10px}@keyframes fadeIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}.card,.mc{animation:fadeIn .3s ease both}`}</style>
+    <style>{`@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');:root{--bg:#0a0e14;--surface:#12171f;--surface2:#1a2030;--border:#1e2738;--border2:#2a3548;--text:#d4dae4;--text2:#8892a4;--text3:#5a6478;--accent:#4c9aff;--accent2:#2d7adf;--ad:rgba(76,154,255,.12);--green:#00d68f;--gd:rgba(0,214,143,.12);--red:#ff4757;--rd:rgba(255,71,87,.12);--yellow:#ffc048;--yd:rgba(255,192,72,.12);--purple:#a78bfa;--pd:rgba(167,139,250,.12);--font:'DM Sans',sans-serif;--mono:'JetBrains Mono',monospace;--radius:10px;--rlg:14px}*{box-sizing:border-box;margin:0;padding:0}body{background:var(--bg);color:var(--text);font-family:var(--font);font-size:14px;-webkit-font-smoothing:antialiased}::-webkit-scrollbar{width:6px;height:6px}::-webkit-scrollbar-track{background:transparent}::-webkit-scrollbar-thumb{background:var(--border2);border-radius:3px}.shell{display:flex;min-height:100vh}.sidebar{width:240px;background:var(--surface);border-right:1px solid var(--border);position:fixed;top:0;left:0;bottom:0;display:flex;flex-direction:column;z-index:100;transition:transform .25s}.sidebar.closed{transform:translateX(-240px)}.main{margin-left:240px;padding:28px 36px 60px;flex:1;min-width:0}.main.full{margin-left:0}.mobile-bar{display:none;position:fixed;top:0;left:0;right:0;height:52px;background:var(--surface);border-bottom:1px solid var(--border);z-index:101;align-items:center;padding:0 16px;justify-content:space-between}@media(max-width:900px){.mobile-bar{display:flex}.main{margin-left:0;padding:68px 16px 40px}.sidebar{transform:translateX(-240px)}.sidebar.open{transform:translateX(0)}}.overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:99}.ss-modal{position:fixed;inset:0;background:rgba(0,0,0,.9);z-index:9999;display:flex;align-items:center;justify-content:center;cursor:pointer}.ss-modal img{max-width:92vw;max-height:92vh;border-radius:var(--radius)}.sb-brand{padding:24px 20px 16px;border-bottom:1px solid var(--border)}.sb-brand h1{font-size:20px;font-weight:700;color:var(--accent);letter-spacing:-.5px}.sb-brand p{font-size:11px;color:var(--text3);margin-top:4px;font-family:var(--mono);text-transform:uppercase;letter-spacing:1px}.sb-nav{flex:1;padding:8px;display:flex;flex-direction:column;gap:1px;overflow-y:auto}.sb-btn{display:flex;align-items:center;gap:10px;width:100%;padding:9px 12px;background:transparent;color:var(--text2);border:none;cursor:pointer;font:inherit;font-size:12px;font-weight:500;border-radius:7px;transition:all .15s;text-align:left}.sb-btn:hover{background:var(--surface2);color:var(--text)}.sb-btn.active{background:var(--ad);color:var(--accent)}.sb-footer{padding:12px;border-top:1px solid var(--border);display:flex;flex-direction:column;gap:6px}.sb-footer button,.sb-footer label{display:block;width:100%;padding:8px;background:var(--surface2);border:1px solid var(--border);border-radius:7px;color:var(--text2);font:inherit;font-size:11px;font-weight:500;cursor:pointer;text-align:center}.sb-footer button:hover,.sb-footer label:hover{background:var(--border);color:var(--text)}.pt{font-size:24px;font-weight:700;letter-spacing:-.5px}.ps{color:var(--text2);font-size:13px;margin-top:2px}.st{font-size:12px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:.8px;margin-bottom:14px;font-family:var(--mono)}.card{background:var(--surface);border:1px solid var(--border);border-radius:var(--rlg);padding:20px;margin-bottom:16px}.ch{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px}.metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;margin-bottom:20px}.mc{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:14px}.ml{font-size:10px;color:var(--text3);font-weight:600;text-transform:uppercase;letter-spacing:.8px;font-family:var(--mono);margin-bottom:6px}.mv{font-size:20px;font-weight:700;font-family:var(--mono);letter-spacing:-.5px;line-height:1}.mv.big{font-size:26px}.ms{font-size:10px;color:var(--text3);margin-top:5px;font-family:var(--mono)}.tag{display:inline-block;padding:3px 8px;border-radius:5px;font-size:10px;font-weight:600;font-family:var(--mono)}.tg{background:var(--gd);color:var(--green)}.tr{background:var(--rd);color:var(--red)}.ty{background:var(--yd);color:var(--yellow)}.ta{background:var(--ad);color:var(--accent)}.tp{background:var(--pd);color:var(--purple)}.tbl{width:100%;border-collapse:collapse;font-size:12px}.tbl th{text-align:left;padding:8px 10px;border-bottom:1px solid var(--border);color:var(--text3);font-weight:600;font-size:9px;text-transform:uppercase;letter-spacing:.8px;font-family:var(--mono);white-space:nowrap}.tbl td{padding:8px 10px;border-bottom:1px solid var(--border)}.tbl tr:hover td{background:var(--surface2)}.tbl .mono{font-family:var(--mono)}.tbl .g{color:var(--green)}.tbl .r{color:var(--red)}.tbl .y{color:var(--yellow)}.tbl .bold{font-weight:600}.form-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(155px,1fr));gap:12px}.field{display:flex;flex-direction:column;gap:4px}.field label{font-size:9px;color:var(--text3);text-transform:uppercase;letter-spacing:.8px;font-weight:600;font-family:var(--mono)}.inp{background:var(--bg);border:1px solid var(--border2);border-radius:7px;color:var(--text);padding:9px 11px;font:inherit;font-size:13px;width:100%;outline:none}.inp:focus{border-color:var(--accent)}select.inp{cursor:pointer;appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%235a6478' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 10px center;padding-right:28px}textarea.inp{resize:vertical;min-height:100px}input[type="date"]::-webkit-calendar-picker-indicator{filter:invert(.6)}.btn{border:none;border-radius:7px;padding:9px 20px;font:inherit;font-size:13px;font-weight:600;cursor:pointer;transition:all .15s}.bp{background:var(--accent);color:#fff}.bp:hover{background:var(--accent2)}.bo{background:transparent;color:var(--text2);border:1px solid var(--border2)}.bo:hover{background:var(--surface2)}.bd{background:var(--rd);color:var(--red)}.bd:hover{background:var(--red);color:#fff}.bs{padding:5px 11px;font-size:11px}.bx{padding:3px 7px;font-size:10px}.pb{display:flex;gap:3px;background:var(--surface);border:1px solid var(--border);border-radius:7px;padding:2px}.pbtn{padding:5px 12px;border:none;background:transparent;color:var(--text3);font:inherit;font-size:11px;font-weight:500;cursor:pointer;border-radius:5px}.pbtn.active{background:var(--ad);color:var(--accent)}.em{text-align:center;padding:24px;color:var(--text3);font-size:12px}.g2{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:14px}.g3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}@media(max-width:700px){.g2,.g3{grid-template-columns:1fr}}.uz{border:2px dashed var(--border2);border-radius:var(--radius);padding:20px;text-align:center;cursor:pointer;color:var(--text3);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;min-height:70px}.uz:hover{border-color:var(--accent)}.uz img{max-width:100%;max-height:120px;border-radius:7px}.sc{border-left:3px solid var(--border2)}.sc.profit{border-left-color:var(--green)}.sc.loss{border-left-color:var(--red)}.af{background:var(--surface2);border:1px solid var(--border);border-radius:7px;padding:9px 11px;font-family:var(--mono);font-size:13px;color:var(--accent)}.info-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px;margin-top:14px}.info-item{background:var(--bg);border-radius:7px;padding:12px}.info-item .val{font-family:var(--mono);font-weight:600;font-size:13px;margin-top:4px}.tip-card{padding:12px 14px;border-radius:8px;margin-bottom:8px;font-size:12px;display:flex;align-items:flex-start;gap:10px}@keyframes fadeIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}.card,.mc{animation:fadeIn .3s ease both}`}</style>
     <div className="shell">
       {user?<MainApp user={user} onLogout={()=>{localStorage.removeItem("btj_user");setUser(null)}}/>:<LoginScreen onLogin={u=>setUser(u)}/>}
     </div>
