@@ -322,7 +322,7 @@ function slAnalysis(trades) {
     .filter(x => x.total > 0)
 }
 
-function buildTips(trades) {
+function genTips(trades) {
   const t2 = rT(trades)
   if (t2.length < 5) return []
   const tp = [], s = cS(t2), ha = hourAnalysis(t2)
@@ -500,6 +500,8 @@ function parseNT8CSV(csvText) {
   return trades
 }
 
+// ═══════════════════════════════════════════════
+// ═══════════════════════════════════════════════
 
 // ── Small UI Components ──
 const TP = ({ value, onChange, label }) => (
@@ -1166,6 +1168,8 @@ function MainApp({ user, onLogout }) {
 
   // ── RENDER empieza en PARTE 3 ──
 
+  // ═══════════════════════════════════════════════
+  // ═══════════════════════════════════════════════
 
   return (
     <>
