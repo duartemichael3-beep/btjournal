@@ -25,7 +25,7 @@ const getMo=ds=>ds?new Date(ds).toLocaleString("es",{month:"short"})+" "+String(
 const getYr=ds=>ds?String(new Date(ds).getFullYear()).slice(-2):""
 const cDur=(s,e)=>{if(!s||!e)return"";const[sh,sm]=s.split(":").map(Number),[eh,em]=e.split(":").map(Number);let d=(eh*60+em)-(sh*60+sm);return d<0?d+1440:d}
 const getDN=ds=>ds?new Date(ds).toLocaleString("es",{weekday:"short"}):""
-const gR=t=>t.resultado==="SL"?-1:t.resultado==="BE"?0:pn(t.rResultado)>0?pn(t.rResultado):0
+const gR=t=>{if(t.resultado==="BE")return 0;const rv=pn(t.rResultado);if(t.resultado==="SL")return rv<0?rv:-1;return rv>0?rv:0}
 const gDD=t=>{const s=pn(t.puntosSlStr),d=pn(t.ddPuntos);return s&&d?Math.round(d/s*10000)/100:null}
 const hBucket=h=>{if(!h||!h.includes(":"))return"";const[hh,mm]=h.split(":").map(Number);return`${String(hh).padStart(2,"0")}:${String(Math.floor(mm/5)*5).padStart(2,"0")}`}
 
@@ -39,18 +39,19 @@ function parseNT8CSV(csvText){
   const hdr=lines[0].split(",").map(h=>h.trim())
   const iInst=hdr.indexOf("Instrument"),iAction=hdr.indexOf("Action"),iQty=hdr.indexOf("Quantity")
   const iPrice=hdr.indexOf("Price"),iTime=hdr.indexOf("Time"),iEX=hdr.indexOf("E/X")
-  const iOrderId=hdr.indexOf("Order ID")
   if(iAction<0||iQty<0||iPrice<0||iTime<0||iEX<0)return[]
 
-  // Parse all rows
+  // Parse all rows, sorted by time
   const rows=lines.slice(1).map(line=>{
     const vs=line.split(",").map(v=>v.trim())
-    return{instrument:vs[iInst]||"",action:vs[iAction]||"",qty:parseInt(vs[iQty])||0,price:parseFloat(vs[iPrice])||0,time:vs[iTime]||"",ex:(vs[iEX]||"").trim(),orderId:vs[iOrderId]||""}
+    return{instrument:vs[iInst]||"",action:vs[iAction]||"",qty:parseInt(vs[iQty])||0,price:parseFloat(vs[iPrice])||0,time:vs[iTime]||"",ex:(vs[iEX]||"").trim()}
   }).filter(r=>r.action&&r.qty&&r.price&&r.time)
 
-  // Group by order: entries and exits
-  // An "Entry" row starts a position, "Exit" rows close it
-  // We'll match by looking at sequential Entry->Exit groups
+  // Sort by parsed time
+  rows.sort((a,b)=>{const ta=parseNT8Time(a.time),tb=parseNT8Time(b.time);return(ta||0)-(tb||0)})
+
+  // Match: each Entry row pairs with subsequent Exit row(s) of OPPOSITE action
+  // until exit qty >= entry qty, or next Entry appears
   const trades=[]
   let i=0
   while(i<rows.length){
@@ -59,70 +60,53 @@ function parseNT8CSV(csvText){
       const entryRow=r
       const entryQty=entryRow.qty
       const entryPrice=entryRow.price
-      const entrySide=entryRow.action // Buy or Sell
+      const isBuy=entryRow.action==="Buy"
       const instrument=entryRow.instrument
       const mult=getMultiplier(instrument)
-      // Collect subsequent exits until position is flat
+      // Collect subsequent Exit rows of opposite action
       const exits=[]
       let exitQty=0
       let j=i+1
       while(j<rows.length&&exitQty<entryQty){
-        if(rows[j].ex==="Exit"){
-          exits.push(rows[j])
-          exitQty+=rows[j].qty
-        }else{
-          break // next entry starts
-        }
+        const nr=rows[j]
+        if(nr.ex==="Exit"){
+          // Verify opposite action (Buy entry -> Sell exit, Sell entry -> Buy exit)
+          const isOpposite=(isBuy&&nr.action==="Sell")||(!isBuy&&nr.action==="Buy")
+          if(isOpposite){exits.push(nr);exitQty+=nr.qty}
+          else break
+        }else break // next Entry starts
         j++
       }
       if(exits.length>0){
-        // Weighted average exit price
         const totalExitQty=exits.reduce((a,e)=>a+e.qty,0)
         const avgExitPrice=exits.reduce((a,e)=>a+e.price*e.qty,0)/totalExitQty
-        // Calculate P&L
-        const isBuy=entrySide==="Buy"
         const points=isBuy?avgExitPrice-entryPrice:entryPrice-avgExitPrice
         const pointsRound=Math.round(points*100)/100
-        const contracts=entryQty
+        const contracts=Math.min(entryQty,totalExitQty)
         const dollarPL=pointsRound*contracts*mult
         const rValue=Math.round(dollarPL/RV*100)/100
 
-        // Parse entry time
         const entryDate=parseNT8Time(entryRow.time)
-        const lastExit=exits[exits.length-1]
-        const exitDate=parseNT8Time(lastExit.time)
-
+        const exitDate=parseNT8Time(exits[exits.length-1].time)
         const fecha=entryDate?`${entryDate.getFullYear()}-${String(entryDate.getMonth()+1).padStart(2,"0")}-${String(entryDate.getDate()).padStart(2,"0")}`:""
         const horaInicio=entryDate?`${String(entryDate.getHours()).padStart(2,"0")}:${String(entryDate.getMinutes()).padStart(2,"0")}`:""
         const horaFinal=exitDate?`${String(exitDate.getHours()).padStart(2,"0")}:${String(exitDate.getMinutes()).padStart(2,"0")}`:""
         const dur=cDur(horaInicio,horaFinal)
 
-        // Determine resultado
-        let resultado="WIN",rResultado=String(Math.abs(rValue)),rMaximo=""
-        if(dollarPL<=-RV*0.8){resultado="SL";rResultado="-1"}
-        else if(Math.abs(dollarPL)<RV*0.15){resultado="BE";rResultado="0"}
-        else if(dollarPL<0){resultado="SL";rResultado="-1"}
+        let resultado,rResultado
+        if(dollarPL>5){resultado="WIN";rResultado=String(Math.round(Math.abs(rValue)*100)/100)}
+        else if(dollarPL<-5){resultado="SL";rResultado=String(Math.round(rValue*100)/100)}
+        else{resultado="BE";rResultado="0"}
 
         trades.push({
-          ...DFT,
-          fecha,
-          horaInicio,
-          horaFinal,
-          duracionTrade:String(dur||""),
-          buySell:isBuy?"BUY":"SELL",
-          puntosSlStr:String(Math.abs(pointsRound)),
-          rResultado:resultado==="WIN"?String(Math.round(rValue*100)/100):resultado==="SL"?"-1":"0",
-          rMaximo:"",
-          resultado,
+          ...DFT,fecha,horaInicio,horaFinal,duracionTrade:String(dur||""),
+          buySell:isBuy?"BUY":"SELL",puntosSlStr:String(Math.abs(pointsRound)),
+          rResultado,rMaximo:"",resultado,
           notas:`NT8: ${instrument} ${contracts}ct @ ${entryPrice}→${Math.round(avgExitPrice*100)/100} = ${pointsRound}pts ${fmt$(Math.round(dollarPL))} (${rValue}R)`
         })
         i=j
-      }else{
-        i++
-      }
-    }else{
-      i++
-    }
+      }else{i++}
+    }else{i++} // skip orphan Exit rows
   }
   return trades
 }
@@ -234,19 +218,28 @@ const ModeToggle=({mode,setMode})=>(
 // ═══ NT8 IMPORT MODAL ═══
 function NT8ImportModal({onImport,onClose}){
   const[preview,setPreview]=useState(null)
-  const[csvText,setCsvText]=useState("")
   const[importing,setImporting]=useState(false)
+  const[fileCount,setFileCount]=useState(0)
 
-  const handleFile=e=>{
-    const f=e.target.files[0];if(!f)return
-    const reader=new FileReader()
-    reader.onload=ev=>{
-      const text=ev.target.result
-      setCsvText(text)
-      const parsed=parseNT8CSV(text)
-      setPreview(parsed)
-    }
-    reader.readAsText(f)
+  const handleFiles=async e=>{
+    const files=Array.from(e.target.files||[])
+    if(!files.length)return
+    setFileCount(files.length)
+    // Read all files and merge rows
+    const allTexts=await Promise.all(files.map(f=>new Promise((res,rej)=>{const r=new FileReader();r.onload=ev=>res(ev.target.result);r.onerror=rej;r.readAsText(f)})))
+    // Merge: take header from first file, data rows from all
+    const allLines=[]
+    let header=""
+    allTexts.forEach((text,idx)=>{
+      const lines=text.replace(/\r/g,"").split("\n").filter(l=>l.trim())
+      if(lines.length<2)return
+      if(!header)header=lines[0]
+      allLines.push(...lines.slice(1))
+    })
+    if(!header||!allLines.length){setPreview([]);return}
+    const merged=header+"\n"+allLines.join("\n")
+    const parsed=parseNT8CSV(merged)
+    setPreview(parsed)
   }
 
   const doImport=async()=>{
@@ -263,34 +256,36 @@ function NT8ImportModal({onImport,onClose}){
         <h2 style={{fontSize:18,fontWeight:700,color:"var(--purple)",fontFamily:"var(--mono)"}}>Importar NT8</h2>
         <button className="btn bo bx" onClick={onClose}>✕</button>
       </div>
-      <p style={{fontSize:12,color:"var(--text2)",marginBottom:16}}>Sube el CSV de ejecuciones de NinjaTrader 8. La app agrupara Entry + Exit, calculara P&L y R automaticamente.</p>
+      <p style={{fontSize:12,color:"var(--text2)",marginBottom:16}}>Sube uno o varios CSVs de ejecuciones de NinjaTrader 8. Puedes seleccionar multiples archivos a la vez. La app agrupara Entry + Exit, calculara P&L y R automaticamente.</p>
       <div style={{marginBottom:16}}>
-        <input type="file" accept=".csv" onChange={handleFile} style={{fontSize:12,color:"var(--text)"}}/>
+        <input type="file" accept=".csv" multiple onChange={handleFiles} style={{fontSize:12,color:"var(--text)"}}/>
       </div>
       {preview&&<>
-        <div style={{marginBottom:12,padding:"10px 14px",background:"var(--gd)",borderRadius:8}}>
+        <div style={{marginBottom:12,padding:"10px 14px",background:"var(--gd)",borderRadius:8,display:"flex",gap:16,alignItems:"center"}}>
           <span style={{fontFamily:"var(--mono)",fontSize:13,color:"var(--green)",fontWeight:700}}>{preview.length} trades detectados</span>
+          {fileCount>1&&<span style={{fontFamily:"var(--mono)",fontSize:11,color:"var(--text3)"}}>{fileCount} archivos</span>}
         </div>
-        <div style={{overflowX:"auto",marginBottom:16}}>
-          <table className="tbl"><thead><tr><th>Fecha</th><th>Hora</th><th>B/S</th><th>SL pts</th><th>R</th><th>Resultado</th><th>Notas</th></tr></thead>
-          <tbody>{preview.slice(0,20).map((t,i)=>{const r=gR(t);return<tr key={i}>
+        {(()=>{const w=preview.filter(t=>t.resultado==="WIN"),l=preview.filter(t=>t.resultado==="SL"),b=preview.filter(t=>t.resultado==="BE");const pnl=preview.reduce((a,t)=>{const r=gR(t);return a+r},0);return<div style={{display:"flex",gap:12,marginBottom:12,flexWrap:"wrap"}}><div style={{background:"var(--surface2)",borderRadius:8,padding:"8px 14px"}}><span style={{fontFamily:"var(--mono)",fontSize:11,color:"var(--text3)"}}>P&L </span><span style={{fontFamily:"var(--mono)",fontSize:13,fontWeight:700,color:pnl>=0?"var(--green)":"var(--red)"}}>{fmt$(Math.round(pnl*RV))}</span></div><div style={{background:"var(--surface2)",borderRadius:8,padding:"8px 14px"}}><span style={{fontFamily:"var(--mono)",fontSize:11,color:"var(--green)"}}>{w.length}W </span><span style={{fontFamily:"var(--mono)",fontSize:11,color:"var(--red)"}}>{l.length}L </span><span style={{fontFamily:"var(--mono)",fontSize:11,color:"var(--yellow)"}}>{b.length}BE</span></div><div style={{background:"var(--surface2)",borderRadius:8,padding:"8px 14px"}}><span style={{fontFamily:"var(--mono)",fontSize:11,color:"var(--text3)"}}>Win% </span><span style={{fontFamily:"var(--mono)",fontSize:13,fontWeight:700,color:w.length/preview.length>=.5?"var(--green)":"var(--red)"}}>{(w.length/preview.length*100).toFixed(2)}%</span></div></div>})()}
+        <div style={{overflowX:"auto",marginBottom:16,maxHeight:300,overflowY:"auto"}}>
+          <table className="tbl"><thead><tr><th>Fecha</th><th>Hora</th><th>B/S</th><th>Pts</th><th>P&L</th><th>R</th><th>Resultado</th></tr></thead>
+          <tbody>{preview.slice(0,30).map((t,i)=>{const r=gR(t);return<tr key={i}>
             <td className="mono">{fmtD(t.fecha)}</td>
             <td className="mono" style={{fontSize:10}}>{t.horaInicio}→{t.horaFinal}</td>
             <td><BT bs={t.buySell}/></td>
             <td className="mono">{t.puntosSlStr}</td>
+            <td className="mono bold" style={{color:r>0?"var(--green)":r<0?"var(--red)":"var(--yellow)"}}>{fmt$(Math.round(r*RV))}</td>
             <td className="mono bold" style={{color:r>0?"var(--green)":r<0?"var(--red)":"var(--yellow)"}}>{fmtR(r)}</td>
             <td><RT res={t.resultado}/></td>
-            <td style={{fontSize:9,color:"var(--text3)",maxWidth:200,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{t.notas}</td>
           </tr>})}</tbody></table>
-          {preview.length>20&&<div style={{fontSize:11,color:"var(--text3)",textAlign:"center",padding:8}}>...y {preview.length-20} mas</div>}
+          {preview.length>30&&<div style={{fontSize:11,color:"var(--text3)",textAlign:"center",padding:8}}>...y {preview.length-30} mas</div>}
         </div>
         <p style={{fontSize:11,color:"var(--text3)",marginBottom:12}}>Despues de importar puedes editar cada trade para agregar setup, contexto, noticias, etc.</p>
         <div style={{display:"flex",gap:8}}>
-          <button className="btn bp" onClick={doImport} disabled={importing}>{importing?"Importando...":` Importar ${preview.length} trades`}</button>
+          <button className="btn bp" onClick={doImport} disabled={importing}>{importing?"Importando...":`Importar ${preview.length} trades`}</button>
           <button className="btn bo" onClick={onClose}>Cancelar</button>
         </div>
       </>}
-      {!preview&&<div className="em">Selecciona un CSV de NinjaTrader 8</div>}
+      {!preview&&<div className="em">Selecciona uno o mas CSVs de NinjaTrader 8</div>}
     </div>
   </div>
 }
@@ -396,8 +391,8 @@ function MainApp({user,onLogout}){
     if(!form.fecha)return alert("Fecha obligatoria")
     setSaving(true)
     const t={...form,semana:String(wom(form.fecha)),duracionTrade:String(cDur(form.horaInicio,form.horaFinal)||"")}
-    if(t.resultado==="SL")t.rResultado="-1"
-    if(t.resultado==="BE")t.rResultado="0"
+    if(appMode==="bt"){if(t.resultado==="SL")t.rResultado="-1";if(t.resultado==="BE")t.rResultado="0"}
+    else{if(t.resultado==="BE")t.rResultado="0";if(t.resultado==="SL"&&!pn(t.rResultado))t.rResultado="-1"}
     try{
       if(editId){
         await supa(`trades?id=eq.${editId}`,{method:"PATCH",body:JSON.stringify(tradeToDb(t,user.id,appMode))})
@@ -516,7 +511,7 @@ function MainApp({user,onLogout}){
 {tab==="addTrade"&&<><h1 className="pt" style={{marginBottom:16}}>{editId?"Editar":"Nuevo trade"} <span style={{fontSize:16,fontFamily:"var(--mono)",color:accentColor,fontWeight:600}}>{modeLabel}</span></h1>
 <div className="card"><div className="st">General</div><div className="form-grid">{F("Fecha","fecha","date")}<div className="field"><label>Semana</label><div className="af">S{autoWeek||"-"}</div></div><TP label="Hora inicio" value={form.horaInicio} onChange={setHI}/><TP label="Hora final" value={form.horaFinal} onChange={setHF}/><div className="field"><label>Duracion</label><div className="af">{autoDur?autoDur+"m":"-"}</div></div>{F("ATR","atr","number")}</div></div>
 <div className="card"><div className="st">Trade</div><div className="form-grid">{F("Setup","setup",null,SETUPS)}{F("Contexto","contexto",null,CTXS)}{F("Buy/Sell","buySell",null,["BUY","SELL"])}{F("Puntos SL","puntosSlStr","number")}{F("DD pts","ddPuntos","number")}<div className="field"><label>DD%</label><div className="af" style={{color:ddPct!==null&&ddPct>50?"var(--red)":"var(--purple)"}}>{ddPct!==null?ddPct+"%":"-"}</div></div></div></div>
-<div className="card"><div className="st">Resultado</div><div className="form-grid">{F("Resultado","resultado",null,RESS)}{isWin&&F("R ganados","rResultado","number")}{isWin&&F("R max mov","rMaximo","number")}{F("Break M30","breakRangoM30",null,["NO","SI"])}{F("Direccion","direccionDia",null,DIRS)}</div>{form.resultado==="SL"&&<p style={{marginTop:10,fontSize:12,color:"var(--red)",fontFamily:"var(--mono)"}}>SL=-1R=-{fmt$(RV)}</p>}{form.resultado==="BE"&&<p style={{marginTop:10,fontSize:12,color:"var(--yellow)",fontFamily:"var(--mono)"}}>BE=0R</p>}{isWin&&pn(form.rResultado)>0&&<p style={{marginTop:10,fontSize:12,color:"var(--green)",fontFamily:"var(--mono)"}}>+{form.rResultado}R=+{fmt$(pn(form.rResultado)*RV)}{pn(form.rMaximo)>0?` (max ${form.rMaximo}R)`:""}</p>}</div>
+<div className="card"><div className="st">Resultado</div><div className="form-grid">{F("Resultado","resultado",null,RESS)}{(isWin||(appMode==="journal"&&form.resultado==="SL"))&&F("R ganados","rResultado","number")}{isWin&&F("R max mov","rMaximo","number")}{F("Break M30","breakRangoM30",null,["NO","SI"])}{F("Direccion","direccionDia",null,DIRS)}</div>{form.resultado==="SL"&&<p style={{marginTop:10,fontSize:12,color:"var(--red)",fontFamily:"var(--mono)"}}>{appMode==="bt"?`SL=-1R=-${fmt$(RV)}`:`SL=${pn(form.rResultado)?form.rResultado+"R="+fmt$(pn(form.rResultado)*RV):"-1R=-"+fmt$(RV)}`}</p>}{form.resultado==="BE"&&<p style={{marginTop:10,fontSize:12,color:"var(--yellow)",fontFamily:"var(--mono)"}}>BE=0R</p>}{isWin&&pn(form.rResultado)>0&&<p style={{marginTop:10,fontSize:12,color:"var(--green)",fontFamily:"var(--mono)"}}>+{form.rResultado}R=+{fmt$(pn(form.rResultado)*RV)}{pn(form.rMaximo)>0?` (max ${form.rMaximo}R)`:""}</p>}</div>
 <div className="card"><div className="st">Noticias</div><div className="form-grid">{F("Noticia?","hayNoticia",null,["NO","SI"])}{form.hayNoticia==="SI"&&F("Hora","noticiaHora",null,NHS)}{form.hayNoticia==="SI"&&F("Impacto","noticiaImpacto",null,NIS)}{form.hayNoticia==="SI"&&F("Tipo","noticiaTipo",null,NTS)}</div></div>
 <div className="card"><div className="st">ORB</div><div className="form-grid" style={{gridTemplateColumns:"repeat(3,1fr)"}}>{F("M5","m5","number")}{F("M15","m15","number")}{F("M30","m30","number")}</div></div>
 <div className="card"><div className="st">Screenshot & Notas</div><div className="g2"><div><input ref={fR} type="file" accept="image/*" onChange={handleFile} style={{display:"none"}}/><div className="uz" onClick={()=>fR.current?.click()}>{form.screenshotPreview?<img src={form.screenshotPreview}/>:<span style={{fontSize:12}}>Subir img</span>}</div>{form.screenshotPreview&&<button className="btn bd bx" style={{marginTop:6}} onClick={()=>setForm(f=>({...f,screenshot:null,screenshotPreview:null}))}>Quitar</button>}</div><div className="field"><label>Notas</label><textarea className="inp" value={form.notas||""} onChange={e=>setForm(f=>({...f,notas:e.target.value}))}/></div></div></div>
