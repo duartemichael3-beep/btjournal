@@ -350,7 +350,14 @@ function Journal({user,onLogout}){
 }
 
 // ROOT
-function App(){const[user,setUser]=useState(()=>{try{return JSON.parse(localStorage.getItem("bt_user"))}catch{return null}});const logout=()=>{localStorage.removeItem("bt_user");setUser(null)};if(!user)return<LoginScreen onLogin={u=>setUser({id:u.id,username:u.username})}/>;return<Journal user={user} onLogout={logout}/>}
+function App(){
+  const[user,setUser]=useState(()=>{
+    try{return JSON.parse(localStorage.getItem("bt_user"))}catch{return null}
+  })
+  const logout=()=>{localStorage.removeItem("bt_user");setUser(null)}
+  if(!user)return <LoginScreen onLogin={u=>setUser({id:u.id,username:u.username})}/>
+  return <Journal user={user} onLogout={logout}/>
+}
 ReactDOM.createRoot(document.getElementById('root')).render(<React.StrictMode><App/></React.StrictMode>)
 
 {tab==="dashboard"&&<><div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:16,flexWrap:"wrap",gap:8}}><div><h1 className="pt">Dashboard</h1><p className="ps">{modeTrades.length} trades | 1R={fmt$(RV)}</p></div><Filters/></div>
