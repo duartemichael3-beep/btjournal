@@ -1,744 +1,402 @@
-/* ============================================================
-   BT JOURNAL — app.jsx  (Parte 1 / 4)
-   Constantes · Helpers · Stats · Parser NT8
-   ============================================================ */
-import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
-import { createClient } from "@supabase/supabase-js";
+import React from 'react'
+import ReactDOM from 'react-dom/client'
+import{useState,useMemo,useEffect,useRef,useCallback}from"react"
+const SU="https://kkcsykncinisnknymonz.supabase.co",SK2="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtrY3N5a25jaW5pc25rbnltb256Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzUyNjYxMzIsImV4cCI6MjA5MDg0MjEzMn0.m8M_nIg6h87ocMedXSOSzOr0Xv0iIwjMWuODTnbHmSI"
+const db=(p,m="GET",b)=>fetch(`${SU}/rest/v1/${p}`,{method:m,headers:{"apikey":SK2,"Authorization":`Bearer ${SK2}`,"Content-Type":"application/json","Prefer":m==="POST"?"return=representation":m==="PATCH"?"return=representation":""},body:b?JSON.stringify(b):undefined}).then(r=>r.json())
+const SETUPS=["M1","M2","M3","J1","J2"],CTXS=["APERTURA","ROMPIMIENTO","GIRO"],DIRS=["RANGO","ALCISTA","BAJISTA"],RESS=["SL","BE","WIN"]
+const NHS=["","08:30","09:45","10:00","10:30"],NIS=["","ALTO","MEDIO","BAJO"],NTS=["","NFP","CPI","PPI","FOMC","JOBLESS CLAIMS","GDP","RETAIL SALES","ISM","PCE","OTRA"]
+const RV=300
+const DT={fecha:"",horaInicio:"09:30",horaFinal:"10:00",atr:"",setup:"M1",contexto:"APERTURA",buySell:"BUY",puntosSlStr:"",rResultado:"",rMaximo:"",resultado:"SL",breakRangoM30:"NO",direccionDia:"RANGO",m5:"",m15:"",m30:"",ddPuntos:"",hayNoticia:"NO",noticiaHora:"",noticiaImpacto:"",noticiaTipo:"",screenshot:null,screenshotPreview:null,notas:""}
+const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,7)
+const pn=v=>{const n=parseFloat(v);return isNaN(n)?0:n}
+const fmt$=v=>(v<0?"-":"")+"$"+Math.abs(v).toLocaleString()
+const fmtR=v=>(v>0?"+":"")+v+"R"
+const fmtPF=v=>v===Infinity?"∞":v.toFixed(2)
+const wom=ds=>ds?Math.ceil(new Date(ds).getDate()/7):""
+const fmtD=ds=>{if(!ds)return"";const d=new Date(ds);return`${String(d.getDate()).padStart(2,"0")}/${String(d.getMonth()+1).padStart(2,"0")}/${String(d.getFullYear()).slice(-2)}`}
+const getMo=ds=>ds?new Date(ds).toLocaleString("es",{month:"short"})+" "+String(new Date(ds).getFullYear()).slice(-2):""
+const getYr=ds=>ds?String(new Date(ds).getFullYear()).slice(-2):""
+const cDur=(s,e)=>{if(!s||!e)return"";const[sh,sm]=s.split(":").map(Number),[eh,em]=e.split(":").map(Number);let d=(eh*60+em)-(sh*60+sm);return d<0?d+1440:d}
+const getDN=ds=>ds?new Date(ds).toLocaleString("es",{weekday:"short"}):""
+const gR=t=>t.resultado==="SL"?-1:t.resultado==="BE"?0:pn(t.rResultado)>0?pn(t.rResultado):0
+const gDD=t=>{const s=pn(t.puntosSlStr),d=pn(t.ddPuntos);return s&&d?Math.round(d/s*10000)/100:null}
+const hBucket=h=>{if(!h||!h.includes(":"))return"";const[hh,mm]=h.split(":").map(Number);return`${String(hh).padStart(2,"0")}:${String(Math.floor(mm/5)*5).padStart(2,"0")}`}
+const t2db=(t,uid2,mode)=>({user_id:uid2,mode:mode,fecha:t.fecha,hora_inicio:t.horaInicio,hora_final:t.horaFinal,duracion_trade:t.duracionTrade||"",atr:t.atr,setup:t.setup,contexto:t.contexto,buy_sell:t.buySell,puntos_sl:t.puntosSlStr,r_resultado:t.rResultado,r_maximo:t.rMaximo,resultado:t.resultado,break_rango_m30:t.breakRangoM30,direccion_dia:t.direccionDia,dd_puntos:t.ddPuntos,hay_noticia:t.hayNoticia,noticia_hora:t.noticiaHora,noticia_impacto:t.noticiaImpacto,noticia_tipo:t.noticiaTipo,m5:t.m5,m15:t.m15,m30:t.m30,screenshot:t.screenshot||"",notas:t.notas,account:t.account||"",parent_account:t.parentAccount||""})
+const db2t=d=>({id:d.id,fecha:d.fecha,horaInicio:d.hora_inicio,horaFinal:d.hora_final,duracionTrade:d.duracion_trade,atr:d.atr,setup:d.setup,contexto:d.contexto,buySell:d.buy_sell,puntosSlStr:d.puntos_sl,rResultado:d.r_resultado,rMaximo:d.r_maximo,resultado:d.resultado,breakRangoM30:d.break_rango_m30,direccionDia:d.direccion_dia,ddPuntos:d.dd_puntos,hayNoticia:d.hay_noticia,noticiaHora:d.noticia_hora,noticiaImpacto:d.noticia_impacto,noticiaTipo:d.noticia_tipo,m5:d.m5,m15:d.m15,m30:d.m30,screenshot:d.screenshot,screenshotPreview:d.screenshot,notas:d.notas,mode:d.mode||"bt",account:d.account||"",parentAccount:d.parent_account||""})
 
-// ── Supabase ────────────────────────────────────────────────
-const SUPABASE_URL = "https://kkcsykncinisnknymonz.supabase.co";
-const SUPABASE_ANON =
-  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtrY3N5a25jaW5pc25rbnltb256Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzUyNjYxMzIsImV4cCI6MjA5MDg0MjEzMn0.m8M_nIg6h87ocMedXSOSzOr0Xv0iIwjMWuODTnbHmSI";
-const supabase = createClient(SUPABASE_URL, SUPABASE_ANON);
-
-// ── Constantes de dominio ───────────────────────────────────
-const R_VALUE = 300; // 1R = $300
-
-const SETUPS   = ["M1", "M2", "M3", "J1", "J2"];
-const CONTEXTOS = ["APERTURA", "ROMPIMIENTO", "GIRO"];
-const DIRECCIONES = ["RANGO", "ALCISTA", "BAJISTA"];
-const RESULTADOS  = ["SL", "BE", "WIN"];
-const BUY_SELL    = ["BUY", "SELL"];
-
-const NOTICIAS_HORAS   = ["08:30", "09:45", "10:00", "10:30"];
-const NOTICIAS_IMPACTO = ["ALTO", "MEDIO", "BAJO"];
-const NOTICIAS_TIPO    = [
-  "NFP","CPI","PPI","FOMC","JOBLESS CLAIMS",
-  "GDP","RETAIL SALES","ISM","PCE","OTRA",
-];
-
-const MODES = { BT: "bt", JOURNAL: "journal" };
-
-// Pestañas disponibles (compartidas BT y Journal)
-const TABS = [
-  { key: "dashboard",  label: "Dashboard" },
-  { key: "calendario", label: "Calendario" },
-  { key: "trades",     label: "Trades" },
-  { key: "nuevo",      label: "Nuevo" },
-  { key: "stats",      label: "Stats" },
-  { key: "setups",     label: "Setups" },
-  { key: "avanzado",   label: "Avanzado" },
-  { key: "tips",       label: "Tips" },
-  { key: "importar",   label: "Importar NT8" }, // solo visible en mode journal
-];
-
-// ── Mapping camelCase <-> snake_case ────────────────────────
-const FIELD_MAP = {
-  horaInicio:     "hora_inicio",
-  horaFinal:      "hora_final",
-  duracionTrade:  "duracion_trade",
-  buySell:        "buy_sell",
-  puntosSl:       "puntos_sl",
-  rResultado:     "r_resultado",
-  rMaximo:        "r_maximo",
-  breakRangoM30:  "break_rango_m30",
-  direccionDia:   "direccion_dia",
-  ddPuntos:       "dd_puntos",
-  hayNoticia:     "hay_noticia",
-  noticiaHora:    "noticia_hora",
-  noticiaImpacto: "noticia_impacto",
-  noticiaTipo:    "noticia_tipo",
-  parentAccount:  "parent_account",
-};
-
-const FIELD_MAP_REV = Object.fromEntries(
-  Object.entries(FIELD_MAP).map(([k, v]) => [v, k])
-);
-
-function tradeToDb(t) {
-  const out = {};
-  for (const [k, v] of Object.entries(t)) {
-    const dbKey = FIELD_MAP[k] || k;
-    out[dbKey] = v;
-  }
-  return out;
+function cS(trades){
+  const z={total:0,wins:0,losses:0,bes:0,winRate:0,totalR:0,totalDollar:0,bestR:0,worstR:-1,profitFactor:0,expectancy:0,expectDollar:0,avgDDpct:0,avgDurWin:0,avgDurSL:0,avgDurBE:0,maxWinStreak:0,maxLossStreak:0,curWinStreak:0,curLossStreak:0,recoveryFactor:0,sharpeRatio:0,payoffRatio:0,sampleValid:false,maxEquityDD:0}
+  if(!trades.length)return z
+  const rs=trades.map(gR),w=rs.filter(r=>r>0),l=rs.filter(r=>r<0),b=rs.filter(r=>r===0)
+  const tR=Math.round(rs.reduce((a,c)=>a+c,0)*100)/100,gw=w.reduce((a,r)=>a+r,0),gl=Math.abs(l.reduce((a,r)=>a+r,0))
+  const dd=trades.map(gDD).filter(v=>v!==null),aDD=dd.length?Math.round(dd.reduce((a,c)=>a+c,0)/dd.length*100)/100:0
+  const exp=Math.round((tR/trades.length)*100)/100
+  const durW=trades.filter(t=>t.resultado==="WIN").map(t=>pn(t.duracionTrade)).filter(v=>v>0)
+  const durS=trades.filter(t=>t.resultado==="SL").map(t=>pn(t.duracionTrade)).filter(v=>v>0)
+  const durB=trades.filter(t=>t.resultado==="BE").map(t=>pn(t.duracionTrade)).filter(v=>v>0)
+  let mxW=0,mxL=0,cW=0,cL=0
+  const sorted=[...trades].sort((a,b2)=>new Date(a.fecha)-new Date(b2.fecha))
+  sorted.forEach(t=>{const r=gR(t);if(r>0){cW++;cL=0}else if(r<0){cL++;cW=0}else{cW=0;cL=0};mxW=Math.max(mxW,cW);mxL=Math.max(mxL,cL)})
+  let peak=0,maxDD2=0,cum=0
+  sorted.forEach(t=>{cum+=gR(t);if(cum>peak)peak=cum;const d2=peak-cum;if(d2>maxDD2)maxDD2=d2})
+  const recovF=maxDD2>0?Math.round(tR/maxDD2*100)/100:tR>0?Infinity:0
+  const mean=tR/trades.length,variance=rs.reduce((a,r)=>a+Math.pow(r-mean,2),0)/rs.length
+  const sharpe=Math.sqrt(variance)>0?Math.round(mean/Math.sqrt(variance)*100)/100:0
+  const avgWR=w.length?gw/w.length:0,avgLR=l.length?gl/l.length:1
+  const payoff=avgLR>0?Math.round(avgWR/avgLR*100)/100:avgWR>0?Infinity:0
+  return{total:trades.length,wins:w.length,losses:l.length,bes:b.length,winRate:Math.round(w.length/trades.length*10000)/100,totalR:tR,totalDollar:Math.round(tR*RV),bestR:rs.length?Math.max(...rs):0,worstR:rs.length?Math.min(...rs):0,profitFactor:gl?Math.round(gw/gl*10000)/10000:gw>0?Infinity:0,expectancy:exp,expectDollar:Math.round(exp*RV),avgDDpct:aDD,avgDurWin:durW.length?Math.round(durW.reduce((a,c)=>a+c,0)/durW.length):0,avgDurSL:durS.length?Math.round(durS.reduce((a,c)=>a+c,0)/durS.length):0,avgDurBE:durB.length?Math.round(durB.reduce((a,c)=>a+c,0)/durB.length):0,maxWinStreak:mxW,maxLossStreak:mxL,curWinStreak:cW,curLossStreak:cL,recoveryFactor:recovF,sharpeRatio:sharpe,payoffRatio:payoff,sampleValid:trades.length>=30,maxEquityDD:Math.round(maxDD2*100)/100}
 }
+const grpBy=(trades,fn)=>{const m={};trades.forEach(t=>{const k=fn(t);if(k)(m[k]??=[]).push(t)});return Object.entries(m).sort((a,b)=>b[0].localeCompare(a[0])).map(([k,ts])=>({key:k,...cS(ts)}))}
+function extraS(trades){if(!trades.length)return{bestDay:"-",worstDay:"-",avgOps:0,bestWd:"-",worstWd:"-"};const bd={};trades.forEach(t=>{if(t.fecha)(bd[t.fecha]??=[]).push(t)});const dt=Object.entries(bd).map(([d,ts])=>({d,r:ts.reduce((a,t)=>a+gR(t),0)}));const b=dt.reduce((a,x)=>x.r>a.r?x:a,dt[0]),ww=dt.reduce((a,x)=>x.r<a.r?x:a,dt[0]);const bw2={};trades.forEach(t=>{if(!t.fecha)return;(bw2[getDN(t.fecha)]??=[]).push(t)});const wt=Object.entries(bw2).map(([wd,ts])=>({wd,r:ts.reduce((a,t)=>a+gR(t),0)}));const bw=wt.reduce((a,x)=>x.r>a.r?x:a,wt[0]),wwk=wt.reduce((a,x)=>x.r<a.r?x:a,wt[0]);return{bestDay:`${fmtD(b.d)} (${b.r>0?"+":""}${Math.round(b.r*100)/100}R)`,worstDay:`${fmtD(ww.d)} (${ww.r>0?"+":""}${Math.round(ww.r*100)/100}R)`,avgOps:Math.round(trades.length/Object.keys(bd).length*100)/100,bestWd:`${bw.wd} (${bw.r>0?"+":""}${Math.round(bw.r*100)/100}R)`,worstWd:`${wwk.wd} (${wwk.r>0?"+":""}${Math.round(wwk.r*100)/100}R)`}}
+function rDist(trades,field){const vs=trades.filter(t=>t.resultado==="WIN").map(t=>Math.round(pn(t[field]))).filter(v=>v>0);if(!vs.length)return{lvl:[],cnt:[],pct:[]};const mx=Math.max(...vs),lvl=[],cnt=[],pct=[];for(let r=1;r<=Math.min(mx,15);r++){const c=vs.filter(v=>v===r).length;lvl.push(r+"R");cnt.push(c);pct.push(Math.round(c/vs.length*10000)/100)}if(vs.some(v=>v>15)){const c=vs.filter(v=>v>15).length;lvl.push("16R+");cnt.push(c);pct.push(Math.round(c/vs.length*10000)/100)}return{lvl,cnt,pct}}
+function hourAn(trades){const bh={};trades.forEach(t=>{const b=hBucket(t.horaInicio);if(b)(bh[b]??=[]).push(t)});return Object.entries(bh).sort((a,b)=>a[0].localeCompare(b[0])).map(([h,ts])=>{const s=cS(ts),rm=ts.filter(t=>t.resultado==="WIN").map(t=>pn(t.rMaximo)).filter(v=>v>0);return{hour:h,...s,avgRmax:rm.length?Math.round(rm.reduce((a,c)=>a+c,0)/rm.length*100)/100:0}})}
+function atrAn(trades){return[[0,10,"0-10"],[10,15,"10-15"],[15,20,"15-20"],[20,25,"20-25"],[25,30,"25-30"],[30,40,"30-40"],[40,999,"40+"]].map(([lo,hi,l])=>({range:l,...cS(trades.filter(t=>{const a=pn(t.atr);return a>lo&&a<=hi}))})).filter(x=>x.total>0)}
+function slAn(trades){return[[0,15,"1-15"],[15,20,"15-20"],[20,25,"20-25"],[25,30,"25-30"],[30,40,"30-40"],[40,999,"40+"]].map(([lo,hi,l])=>({range:l,...cS(trades.filter(t=>{const p=pn(t.puntosSlStr);return p>lo&&p<=hi}))})).filter(x=>x.total>0)}
+function tips(trades){if(trades.length<5)return[];const t=[],s=cS(trades),ha=hourAn(trades),aa=atrAn(trades),sa=slAn(trades);if(ha.length){const best=ha.reduce((a,x)=>x.totalR>a.totalR?x:a,ha[0]);if(best.total>=3)t.push({type:"green",text:`Mejor hora: ${best.hour} ${best.winRate.toFixed(2)}%WR ${best.totalR>0?"+":""}${best.totalR}R`})}if(ha.length){const worst=ha.reduce((a,x)=>x.totalR<a.totalR?x:a,ha[0]);if(worst.total>=3&&worst.totalR<0)t.push({type:"red",text:`Evita ${worst.hour}: ${worst.totalR}R`})}if(aa.length>1){const best=aa.reduce((a,x)=>x.winRate>a.winRate&&x.total>=3?x:a,aa[0]);t.push({type:"green",text:`ATR ${best.range}: ${best.winRate.toFixed(2)}%WR`})}if(sa.length>1){const best=sa.reduce((a,x)=>x.winRate>a.winRate&&x.total>=3?x:a,sa[0]);t.push({type:"green",text:`SL ${best.range}pts: ${best.winRate.toFixed(2)}%WR`})}const wt2=trades.filter(t2=>t2.resultado==="WIN"&&pn(t2.rMaximo)>0&&pn(t2.rResultado)>0);if(wt2.length>=3){const at2=Math.round(wt2.reduce((a,t2)=>a+pn(t2.rResultado),0)/wt2.length*100)/100;const am=Math.round(wt2.reduce((a,t2)=>a+pn(t2.rMaximo),0)/wt2.length*100)/100;t.push({type:Math.round(at2/am*100)<50?"yellow":"green",text:`Capturas ${at2}R de ${am}R (${Math.round(at2/am*100)}%)`})}if(s.avgDurWin)t.push({type:"blue",text:`Dur: WIN=${s.avgDurWin}m SL=${s.avgDurSL}m`});if(s.maxLossStreak>=3)t.push({type:"red",text:`Racha loss max: ${s.maxLossStreak}${s.curLossStreak>=2?" (AHORA:"+s.curLossStreak+")":""}`});if(s.recoveryFactor!==Infinity&&s.recoveryFactor>0)t.push({type:s.recoveryFactor>=2?"green":"yellow",text:`Recovery: ${s.recoveryFactor.toFixed(2)}`});if(!s.sampleValid)t.push({type:"yellow",text:`${s.total}/30 trades min para stats confiables`});return t}
 
-function dbToTrade(row) {
-  const out = {};
-  for (const [k, v] of Object.entries(row)) {
-    const jsKey = FIELD_MAP_REV[k] || k;
-    out[jsKey] = v;
-  }
-  return out;
-}
-
-// ── Helpers de fecha / hora ─────────────────────────────────
-function fmtDate(iso) {
-  // YYYY-MM-DD -> DD/MM/YY
-  if (!iso) return "";
-  const [y, m, d] = iso.split("-");
-  return `${d}/${m}/${y.slice(2)}`;
-}
-
-function isoFromParts(d, m, y) {
-  return `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
-}
-
-function weekOfMonth(isoDate) {
-  if (!isoDate) return "";
-  const d = new Date(isoDate + "T00:00:00");
-  const day = d.getDate();
-  return `S${Math.ceil(day / 7)}`;
-}
-
-function calcDuration(start, end) {
-  if (!start || !end) return "";
-  const [h1, m1] = start.split(":").map(Number);
-  const [h2, m2] = end.split(":").map(Number);
-  const diff = (h2 * 60 + m2) - (h1 * 60 + m1);
-  if (diff <= 0) return "";
-  const hh = Math.floor(diff / 60);
-  const mm = diff % 60;
-  return hh > 0 ? `${hh}h ${mm}m` : `${mm}m`;
-}
-
-function calcDurationMinutes(start, end) {
-  if (!start || !end) return 0;
-  const [h1, m1] = start.split(":").map(Number);
-  const [h2, m2] = end.split(":").map(Number);
-  return (h2 * 60 + m2) - (h1 * 60 + m1);
-}
-
-// Generar opciones de hora cada 1 min de 00:00 a 23:59
-function generateTimeOptions() {
-  const opts = [];
-  for (let h = 0; h < 24; h++) {
-    for (let m = 0; m < 60; m++) {
-      opts.push(
-        `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`
-      );
-    }
-  }
-  return opts;
-}
-const TIME_OPTIONS = generateTimeOptions();
-
-// Calcular DD%
-function calcDDPercent(ddPuntos, puntosSl) {
-  const dd = parseFloat(ddPuntos) || 0;
-  const sl = parseFloat(puntosSl) || 0;
-  if (sl === 0) return 0;
-  return ((dd / sl) * 100).toFixed(2);
-}
-
-// ── Días del mes para calendario ────────────────────────────
-function getDaysInMonth(year, month) {
-  return new Date(year, month + 1, 0).getDate();
-}
-
-function getFirstDayOfWeek(year, month) {
-  // 0=domingo -> lo mapeamos a lunes=0
-  const d = new Date(year, month, 1).getDay();
-  return d === 0 ? 6 : d - 1;
-}
-
-// ── Funciones de estadísticas ───────────────────────────────
-
-function calcStats(trades) {
-  if (!trades || trades.length === 0) {
-    return {
-      total: 0, wins: 0, losses: 0, bes: 0,
-      winRate: 0, profitFactor: 0, expectancyR: 0, expectancy$: 0,
-      sharpe: 0, recoveryFactor: 0, payoff: 0, maxDD: 0, ddPercent: 0,
-      sampleSize: 0, maxWinStreak: 0, maxLossStreak: 0,
-      avgDurationWin: 0, avgDurationSL: 0, avgDurationBE: 0,
-      totalR: 0, totalPnL: 0,
-    };
-  }
-
-  const wins   = trades.filter((t) => t.resultado === "WIN");
-  const losses = trades.filter((t) => t.resultado === "SL");
-  const bes    = trades.filter((t) => t.resultado === "BE");
-
-  const total = trades.length;
-  const winRate = total > 0 ? (wins.length / total) * 100 : 0;
-
-  // R & P&L
-  const rValues = trades.map((t) => {
-    if (t.resultado === "SL") return -1;
-    if (t.resultado === "BE") return 0;
-    return parseFloat(t.rResultado) || 0;
-  });
-  const totalR   = rValues.reduce((a, b) => a + b, 0);
-  const totalPnL = totalR * R_VALUE;
-
-  const grossWinR  = rValues.filter((r) => r > 0).reduce((a, b) => a + b, 0);
-  const grossLossR = Math.abs(rValues.filter((r) => r < 0).reduce((a, b) => a + b, 0));
-
-  const profitFactor = grossLossR > 0 ? grossWinR / grossLossR : grossWinR > 0 ? Infinity : 0;
-
-  // Expectancy
-  const expectancyR = total > 0 ? totalR / total : 0;
-  const expectancy$ = expectancyR * R_VALUE;
-
-  // Sharpe (simplificado: media / stddev de R)
-  const meanR = total > 0 ? totalR / total : 0;
-  const variance =
-    total > 1
-      ? rValues.reduce((sum, r) => sum + (r - meanR) ** 2, 0) / (total - 1)
-      : 0;
-  const stdR = Math.sqrt(variance);
-  const sharpe = stdR > 0 ? meanR / stdR : 0;
-
-  // Max Drawdown (en R)
-  let peak = 0;
-  let cumR = 0;
-  let maxDD = 0;
-  for (const r of rValues) {
-    cumR += r;
-    if (cumR > peak) peak = cumR;
-    const dd = peak - cumR;
-    if (dd > maxDD) maxDD = dd;
-  }
-  const ddPercent = peak > 0 ? (maxDD / peak) * 100 : 0;
-
-  // Recovery Factor
-  const recoveryFactor = maxDD > 0 ? totalR / maxDD : totalR > 0 ? Infinity : 0;
-
-  // Payoff Ratio
-  const avgWinR  = wins.length > 0
-    ? wins.reduce((s, t) => s + (parseFloat(t.rResultado) || 0), 0) / wins.length
-    : 0;
-  const avgLossR = losses.length > 0 ? 1 : 0; // SL siempre -1R
-  const payoff = avgLossR > 0 ? avgWinR / avgLossR : 0;
-
-  // Rachas
-  let maxWinStreak = 0, maxLossStreak = 0, ws = 0, ls = 0;
-  for (const t of trades) {
-    if (t.resultado === "WIN") { ws++; ls = 0; }
-    else if (t.resultado === "SL") { ls++; ws = 0; }
-    else { ws = 0; ls = 0; }
-    if (ws > maxWinStreak) maxWinStreak = ws;
-    if (ls > maxLossStreak) maxLossStreak = ls;
-  }
-
-  // Duración promedio por resultado
-  function avgDur(arr) {
-    const durs = arr
-      .map((t) => calcDurationMinutes(t.horaInicio, t.horaFinal))
-      .filter((d) => d > 0);
-    return durs.length > 0 ? durs.reduce((a, b) => a + b, 0) / durs.length : 0;
-  }
-
-  return {
-    total,
-    wins: wins.length,
-    losses: losses.length,
-    bes: bes.length,
-    winRate,
-    profitFactor,
-    expectancyR,
-    expectancy$,
-    sharpe,
-    recoveryFactor,
-    payoff,
-    maxDD,
-    ddPercent,
-    sampleSize: total,
-    maxWinStreak,
-    maxLossStreak,
-    avgDurationWin: avgDur(wins),
-    avgDurationSL:  avgDur(losses),
-    avgDurationBE:  avgDur(bes),
-    totalR,
-    totalPnL,
-  };
-}
-
-// Equity curve data  [{ idx, cumR, cumPnL }]
-function buildEquityCurve(trades) {
-  let cum = 0;
-  return trades.map((t, i) => {
-    const r =
-      t.resultado === "SL" ? -1 : t.resultado === "BE" ? 0 : parseFloat(t.rResultado) || 0;
-    cum += r;
-    return { idx: i + 1, cumR: cum, cumPnL: cum * R_VALUE, fecha: t.fecha };
-  });
-}
-
-// P&L por día  { "YYYY-MM-DD": totalPnL }
-function pnlByDay(trades) {
-  const map = {};
-  for (const t of trades) {
-    const r =
-      t.resultado === "SL" ? -1 : t.resultado === "BE" ? 0 : parseFloat(t.rResultado) || 0;
-    map[t.fecha] = (map[t.fecha] || 0) + r * R_VALUE;
-  }
-  return map;
-}
-
-// P&L por semana del mes  { "S1": totalPnL, ... }
-function pnlByWeek(trades) {
-  const map = {};
-  for (const t of trades) {
-    const w = weekOfMonth(t.fecha);
-    const r =
-      t.resultado === "SL" ? -1 : t.resultado === "BE" ? 0 : parseFloat(t.rResultado) || 0;
-    map[w] = (map[w] || 0) + r * R_VALUE;
-  }
-  return map;
-}
-
-// Donut data  [{ label, value, color }]
-function donutData(stats) {
-  return [
-    { label: "WIN", value: stats.wins,   color: "#22c55e" },
-    { label: "SL",  value: stats.losses, color: "#ef4444" },
-    { label: "BE",  value: stats.bes,    color: "#facc15" },
-  ];
-}
-
-// Stats por setup
-function statsBySetup(trades) {
-  const map = {};
-  for (const s of SETUPS) {
-    const sub = trades.filter((t) => t.setup === s);
-    map[s] = calcStats(sub);
-  }
-  return map;
-}
-
-// Stats por bloque de hora (cada 5 min)
-function statsByHourBlock(trades) {
-  const map = {};
-  for (const t of trades) {
-    if (!t.horaInicio) continue;
-    const [h, m] = t.horaInicio.split(":").map(Number);
-    const block = `${String(h).padStart(2, "0")}:${String(Math.floor(m / 5) * 5).padStart(2, "0")}`;
-    if (!map[block]) map[block] = [];
-    map[block].push(t);
-  }
-  const result = {};
-  for (const [block, arr] of Object.entries(map)) {
-    result[block] = calcStats(arr);
-  }
-  return result;
-}
-
-// Stats por ATR range
-function statsByATR(trades) {
-  const ranges = [
-    { label: "0-20",  min: 0,  max: 20 },
-    { label: "20-40", min: 20, max: 40 },
-    { label: "40-60", min: 40, max: 60 },
-    { label: "60-80", min: 60, max: 80 },
-    { label: "80+",   min: 80, max: Infinity },
-  ];
-  const result = {};
-  for (const r of ranges) {
-    const sub = trades.filter((t) => {
-      const a = parseFloat(t.atr) || 0;
-      return a >= r.min && a < r.max;
-    });
-    if (sub.length > 0) result[r.label] = calcStats(sub);
-  }
-  return result;
-}
-
-// Stats por SL pts range
-function statsBySLPts(trades) {
-  const ranges = [
-    { label: "0-5",   min: 0,  max: 5 },
-    { label: "5-10",  min: 5,  max: 10 },
-    { label: "10-15", min: 10, max: 15 },
-    { label: "15-20", min: 15, max: 20 },
-    { label: "20+",   min: 20, max: Infinity },
-  ];
-  const result = {};
-  for (const r of ranges) {
-    const sub = trades.filter((t) => {
-      const sl = parseFloat(t.puntosSl) || 0;
-      return sl >= r.min && sl < r.max;
-    });
-    if (sub.length > 0) result[r.label] = calcStats(sub);
-  }
-  return result;
-}
-
-// Stats por dirección
-function statsByDirection(trades) {
-  const result = {};
-  for (const d of DIRECCIONES) {
-    const sub = trades.filter((t) => t.direccionDia === d);
-    if (sub.length > 0) result[d] = calcStats(sub);
-  }
-  return result;
-}
-
-// R tomado vs R máximo distribution
-function rTakenVsMax(trades) {
+// NT8 CSV Parser
+function parseNT8(csvText){
+  const lines=csvText.split("\n").filter(l=>l.trim());if(lines.length<2)return[]
+  const hd=lines[0].split(",").map(h=>h.trim())
+  const rows=lines.slice(1).map(l=>{const vs=l.split(",").map(v=>v.trim());const o={};hd.forEach((h,i)=>o[h]=vs[i]||"");return o})
+  // Group by Entry/Exit pairs using Order ID proximity and time
+  const entries=rows.filter(r=>r["E/X"]==="Entry")
+  const exits=rows.filter(r=>r["E/X"]==="Exit")
+  const trades=[]
+  entries.forEach(entry=>{
+    const eTime=new Date(entry.Time)
+    // Find exits within 30 min of entry
+    const myExits=exits.filter(ex=>{const t2=new Date(ex.Time);return Math.abs(t2-eTime)<30*60*1000&&ex.Instrument===entry.Instrument})
+    if(!myExits.length)return
+    // Calc P&L
+    const entryPrice=parseFloat(entry.Price)
+    const isBuy=entry.Action==="Buy"
+    let totalPnL=0
+    myExits.forEach(ex=>{
+      const exitPrice=parseFloat(ex.Price)
+      const qty=parseInt(ex.Quantity)||1
+      const pnl=isBuy?(exitPrice-entryPrice)*qty:(entryPrice-exitPrice)*qty
+      totalPnL+=pnl
+    })
+    const totalQty=myExits.reduce((a,ex)=>a+(parseInt(ex.Quantity)||1),0)
+    const lastExit=myExits[myExits.length-1]
+    const exitTime=new Date(lastExit.Time)
+    const fecha=`${eTime.getFullYear()}-${String(eTime.getMonth()+1).padStart(2,"0")}-${String(eTime.getDate()).padStart(2,"0")}`
+    const hI=`${String(eTime.getHours()).padStart(2,"0")}:${String(eTime.getMinutes()).padStart(2,"0")}`
+    const hF=`${String(exitTime.getHours()).padStart(2,"0")}:${String(exitTime.getMinutes()).padStart(2,"0")}`
+    const durMin=Math.round((exitTime-eTime)/60000)
+    // MNQ point value = $0.50 per point per contract... but we use R system
+    // For now store raw P&L in points and let user assign R
+    const pointsPnL=Math.round(totalPnL*100)/100/totalQty
+    const resultado=totalPnL>0?"WIN":totalPnL<0?"SL":"BE"
+    const account=entry.Account||""
+    // Remove exits used
+    myExits.forEach(ex=>{const idx=exits.indexOf(ex);if(idx>=0)exits.splice(idx,1)})
+    trades.push({...DT,fecha,horaInicio:hI,horaFinal:hF,duracionTrade:String(durMin),buySell:isBuy?"BUY":"SELL",puntosSlStr:String(Math.abs(Math.round(pointsPnL*4)/4)),resultado,rResultado:resultado==="SL"?"-1":resultado==="BE"?"0":"1",notas:`NT8: ${entry.Instrument} x${totalQty} P&L=${totalPnL>0?"+":""}${Math.round(totalPnL*100)/100}pts`,account,parentAccount:entry.Connection||""})
+  })
   return trades
-    .filter((t) => t.resultado === "WIN" && t.rResultado && t.rMaximo)
-    .map((t) => ({
-      taken: parseFloat(t.rResultado) || 0,
-      max:   parseFloat(t.rMaximo) || 0,
-      fecha: t.fecha,
-      setup: t.setup,
-    }));
 }
 
-// % de movimiento capturado
-function capturePercent(trades) {
-  const data = rTakenVsMax(trades);
-  if (data.length === 0) return 0;
-  const pcts = data.map((d) => (d.max > 0 ? (d.taken / d.max) * 100 : 0));
-  return pcts.reduce((a, b) => a + b, 0) / pcts.length;
+// UI Components
+const HOURS=[];for(let h=0;h<24;h++)for(let m=0;m<60;m++)HOURS.push(`${String(h).padStart(2,"0")}:${String(m).padStart(2,"0")}`)
+const TP2=({value,onChange,label})=>(<div className="field"><label>{label}</label><select className="inp" value={value} onChange={e=>onChange(e.target.value)}>{HOURS.map(h=><option key={h} value={h}>{h}</option>)}</select></div>)
+const Met=({label,value,sub,color,big})=>(<div className="mc"><div className="ml">{label}</div><div className={`mv${big?" big":""}`} style={{color}}>{value}</div>{sub&&<div className="ms">{sub}</div>}</div>)
+const RT=({res})=><span className={`tag ${res==="SL"?"tr":res==="BE"?"ty":"tg"}`}>{res}</span>
+const DT2=({dir})=><span className={`tag ${dir==="ALCISTA"?"tg":dir==="BAJISTA"?"tr":"ty"}`}>{dir}</span>
+const ST=({s})=><span className="tag ta">{s}</span>
+const BT=({bs})=><span className={`tag ${bs==="BUY"?"tg":"tr"}`}>{bs}</span>
+const EC=({trades})=>{if(trades.length<2)return<div className="em">Min 2</div>;const sorted=[...trades].sort((a,b)=>new Date(a.fecha)-new Date(b.fecha));let cum=0;const pts=[0,...sorted.map(t=>(cum+=gR(t),Math.round(cum*100)/100))];const mn=Math.min(...pts),mx=Math.max(...pts),rng=mx-mn||1,w=600,h=180,p=40,tx=i=>p+(i/(pts.length-1))*(w-p*2),ty=v=>h-p-((v-mn)/rng)*(h-p*2);const line=pts.map((v,i)=>`${i===0?"M":"L"} ${tx(i).toFixed(1)} ${ty(v).toFixed(1)}`).join(" ");const area=line+` L ${tx(pts.length-1).toFixed(1)} ${ty(mn).toFixed(1)} L ${tx(0).toFixed(1)} ${ty(mn).toFixed(1)} Z`;const col=cum>=0?"var(--green)":"var(--red)";return<svg viewBox={`0 0 ${w} ${h}`} style={{width:"100%",display:"block"}}><defs><linearGradient id="eF" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={col} stopOpacity={.25}/><stop offset="100%" stopColor={col} stopOpacity={0}/></linearGradient></defs>{[0,.25,.5,.75,1].map((pc,i)=>{const y=ty(mn+pc*rng);return<g key={i}><line x1={p} y1={y} x2={w-p} y2={y} stroke="var(--border)" strokeWidth={.5} strokeDasharray="4 4"/><text x={p-6} y={y+4} textAnchor="end" fill="var(--text3)" fontSize={10} fontFamily="var(--mono)">{Math.round((mn+pc*rng)*10)/10}R</text></g>})}<path d={area} fill="url(#eF)"/><path d={line} fill="none" stroke={col} strokeWidth={2.5} strokeLinejoin="round"/><circle cx={tx(pts.length-1)} cy={ty(pts[pts.length-1])} r={4} fill={col}/></svg>}
+const BC=({data,labels,height=130,unit="",colors})=>{if(!data.length||data.every(v=>v===0))return<div className="em">Sin datos</div>;const max=Math.max(...data.map(Math.abs),.1),bw=Math.min(44,Math.max(18,300/data.length)),tw=data.length*(bw+6)+16,bl=height-12;return<div style={{overflowX:"auto"}}><svg width={Math.max(tw,200)} height={height+28}><line x1={8} y1={bl} x2={tw} y2={bl} stroke="var(--border)" strokeWidth={1}/>{data.map((v,i)=>{const bh=Math.abs(v)/max*(height-30),x=i*(bw+6)+12,pos=v>=0,y=pos?bl-bh:bl,fill=colors?colors[i]:pos?"var(--green)":"var(--red)";return<g key={i}><rect x={x} y={y} width={bw} height={Math.max(bh,2)} rx={3} fill={fill} opacity={.85}/><text x={x+bw/2} y={pos?y-4:y+bh+12} textAnchor="middle" fill="var(--text2)" fontSize={9} fontFamily="var(--mono)">{Math.round(v*10)/10}{unit}</text><text x={x+bw/2} y={height+22} textAnchor="middle" fill="var(--text3)" fontSize={8} fontFamily="var(--mono)">{labels?.[i]}</text></g>})}</svg></div>}
+
+// Login
+function LoginScreen({onLogin}){const[user,setUser]=useState("");const[pass,setPass]=useState("");const[mode,setMode]=useState("login");const[err,setErr]=useState("");const[ld,setLd]=useState(false);const doLogin=async()=>{if(!user||!pass)return setErr("Completa ambos campos");setLd(true);setErr("");try{const u=await supa(`users?username=eq.${encodeURIComponent(user)}&select=*`);if(!u.length){setErr("Usuario no existe");setLd(false);return};if(u[0].password!==pass){setErr("Contrasena incorrecta");setLd(false);return};localStorage.setItem("bt_user",JSON.stringify({id:u[0].id,username:u[0].username}));onLogin(u[0])}catch(e){setErr("Error de conexion")};setLd(false)};const doReg=async()=>{if(!user||!pass)return setErr("Completa ambos");if(user.length<3)return setErr("Min 3 chars");if(pass.length<4)return setErr("Min 4 chars");setLd(true);setErr("");try{const ex=await supa(`users?username=eq.${encodeURIComponent(user)}&select=id`);if(ex.length){setErr("Ya existe");setLd(false);return};const r=await supa("users","POST",{username:user,password:pass});if(r.length){localStorage.setItem("bt_user",JSON.stringify({id:r[0].id,username:r[0].username}));onLogin(r[0])}else setErr("Error")}catch(e){setErr("Error")};setLd(false)};return<div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:"var(--bg)",fontFamily:"var(--font)"}}><div style={{width:340,background:"var(--surface)",border:"1px solid var(--border)",borderRadius:14,padding:28}}><h1 style={{fontSize:22,fontWeight:700,color:"var(--accent)",textAlign:"center",fontFamily:"var(--mono)"}}>BT Journal</h1><p style={{textAlign:"center",color:"var(--text3)",fontSize:11,marginBottom:24,fontFamily:"var(--mono)"}}>Pro</p><div style={{display:"flex",gap:3,marginBottom:18,background:"var(--bg)",borderRadius:7,padding:2}}><button onClick={()=>{setMode("login");setErr("")}} style={{flex:1,padding:7,border:"none",borderRadius:5,cursor:"pointer",fontSize:12,fontWeight:600,background:mode==="login"?"var(--ad)":"transparent",color:mode==="login"?"var(--accent)":"var(--text3)",fontFamily:"inherit"}}>Entrar</button><button onClick={()=>{setMode("register");setErr("")}} style={{flex:1,padding:7,border:"none",borderRadius:5,cursor:"pointer",fontSize:12,fontWeight:600,background:mode==="register"?"var(--ad)":"transparent",color:mode==="register"?"var(--accent)":"var(--text3)",fontFamily:"inherit"}}>Registro</button></div><div style={{display:"flex",flexDirection:"column",gap:10}}><div className="field"><label>Usuario</label><input className="inp" value={user} onChange={e=>setUser(e.target.value.toLowerCase().trim())} onKeyDown={e=>e.key==="Enter"&&(mode==="login"?doLogin():doReg())}/></div><div className="field"><label>Contrasena</label><input className="inp" type="password" value={pass} onChange={e=>setPass(e.target.value)} onKeyDown={e=>e.key==="Enter"&&(mode==="login"?doLogin():doReg())}/></div>{err&&<div style={{color:"var(--red)",fontSize:11,fontFamily:"var(--mono)",textAlign:"center"}}>{err}</div>}<button className="btn bp" style={{width:"100%",opacity:ld?.6:1}} onClick={mode==="login"?doLogin:doReg} disabled={ld}>{ld?"...":(mode==="login"?"Entrar":"Crear cuenta")}</button></div></div></div>}
+
+// Calendar
+const Calendar=({trades,month,year,onPrev,onNext})=>{const dim=new Date(year,month+1,0).getDate(),fd=new Date(year,month,1).getDay(),mn=new Date(year,month).toLocaleString("es",{month:"long",year:"numeric"});const bd={};trades.forEach(t=>{if(!t.fecha)return;const d=new Date(t.fecha);if(d.getMonth()===month&&d.getFullYear()===year)(bd[d.getDate()]??=[]).push(t)});const cells=[];for(let i=0;i<fd;i++)cells.push(null);for(let d=1;d<=dim;d++)cells.push(d);const weeks=[];for(let i=0;i<cells.length;i+=7)weeks.push(cells.slice(i,i+7));const ws=weeks.map(wk=>{let r=0,c=0;wk.forEach(d=>{if(d&&bd[d])bd[d].forEach(t=>{r+=gR(t);c++})});return{r:Math.round(r*100)/100,c}});const mt=trades.filter(t=>{if(!t.fecha)return false;const d=new Date(t.fecha);return d.getMonth()===month&&d.getFullYear()===year});const mr=Math.round(mt.reduce((a,t)=>a+gR(t),0)*100)/100;return<div className="card" style={{padding:0,overflow:"hidden"}}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"12px 16px",borderBottom:"1px solid var(--border)"}}><span style={{fontFamily:"var(--mono)",fontWeight:700,fontSize:14,textTransform:"capitalize"}}>{mn}</span><div style={{display:"flex",gap:5}}><button className="btn bo bx" onClick={onPrev}>&lt;</button><button className="btn bo bx" onClick={onNext}>&gt;</button></div></div><div style={{display:"grid",gridTemplateColumns:"repeat(8,1fr)",fontSize:10,fontFamily:"var(--mono)"}}>{["Do","Lu","Ma","Mi","Ju","Vi","Sa","Sem"].map(d=><div key={d} style={{padding:"7px 3px",textAlign:"center",color:"var(--text3)",borderBottom:"1px solid var(--border)",fontWeight:600}}>{d}</div>)}{weeks.map((wk,wi)=><React.Fragment key={wi}>{wk.map((d,di)=>{if(!d)return<div key={di} style={{padding:8,borderBottom:"1px solid var(--border)",background:"var(--bg)"}}/>;const dt2=bd[d]||[],dr=Math.round(dt2.reduce((a,t)=>a+gR(t),0)*100)/100,bg=dt2.length?dr>0?"rgba(0,214,143,.08)":dr<0?"rgba(255,71,87,.08)":"var(--surface)":"var(--surface)";return<div key={di} style={{padding:"5px 3px",borderBottom:"1px solid var(--border)",borderRight:"1px solid var(--border)",background:bg,minHeight:50}}><div style={{fontSize:9,color:"var(--text3)",marginBottom:2}}>{d}</div>{dt2.length?<><div style={{fontSize:12,fontWeight:700,color:dr>0?"var(--green)":dr<0?"var(--red)":"var(--yellow)",fontFamily:"var(--mono)"}}>{fmt$(dr*RV)}</div><div style={{fontSize:8,color:"var(--text3)"}}>{dt2.length}t</div></>:<div style={{fontSize:8,color:"var(--text3)"}}>-</div>}</div>})}{Array(7-wk.length).fill(null).map((_,i)=><div key={`p${i}`} style={{padding:8,borderBottom:"1px solid var(--border)",background:"var(--bg)"}}/>)}<div style={{padding:"5px 3px",borderBottom:"1px solid var(--border)",background:"var(--surface2)",display:"flex",flexDirection:"column",justifyContent:"center",alignItems:"center"}}><div style={{fontSize:8,color:"var(--text3)"}}>S{wi+1}</div><div style={{fontSize:11,fontWeight:700,color:ws[wi].r>0?"var(--green)":ws[wi].r<0?"var(--red)":"var(--text3)",fontFamily:"var(--mono)"}}>{ws[wi].c?fmt$(ws[wi].r*RV):"-"}</div></div></React.Fragment>)}</div><div style={{display:"flex",justifyContent:"flex-end",gap:14,padding:"10px 16px",borderTop:"1px solid var(--border)",background:"var(--surface2)"}}><span style={{fontSize:10,color:"var(--text3)",fontFamily:"var(--mono)"}}>TRADES: <b style={{color:"var(--text)"}}>{mt.length}</b></span><span style={{fontSize:10,color:"var(--text3)",fontFamily:"var(--mono)"}}>P&L: <b style={{color:mr>=0?"var(--green)":"var(--red)"}}>{mr>=0?"+":""}{fmt$(mr*RV)}</b></span></div></div>}
+
+// ═══ MAIN JOURNAL ═══
+function Journal({user,onLogout}){
+  const[allTrades,setAllTrades]=useState([])
+  const[loading,setLoading]=useState(true)
+  const[appMode,setAppMode]=useState("bt") // "bt" or "journal"
+  const[tab,setTab]=useState("dashboard")
+  const[form,setForm]=useState({...DT})
+  const[editId,setEditId]=useState(null)
+  const[fP,setFP]=useState("all")
+  const[fS,setFS]=useState("all")
+  const[fN,setFN]=useState("")
+  const[viewSS,setViewSS]=useState(null)
+  const[sb,setSb]=useState(window.innerWidth>900)
+  const[calMonth,setCalMonth]=useState(new Date().getMonth())
+  const[calYear,setCalYear]=useState(new Date().getFullYear())
+  const[saving,setSaving]=useState(false)
+  const fRef=useRef(),ntRef=useRef()
+
+  const loadTrades=useCallback(async()=>{try{const data=await supa(`trades?user_id=eq.${user.id}&select=*&order=created_at.desc`);setAllTrades((data||[]).map(dbToTrade))}catch(e){console.error(e)};setLoading(false)},[user.id])
+  useEffect(()=>{loadTrades()},[loadTrades])
+  useEffect(()=>{const fn=()=>setSb(window.innerWidth>900);window.addEventListener("resize",fn);return()=>window.removeEventListener("resize",fn)},[])
+
+  // Filter by mode first, then by other filters
+  const trades=useMemo(()=>allTrades.filter(t=>(t.mode||"bt")===appMode),[allTrades,appMode])
+
+  const setHI=v=>setForm(f=>({...f,horaInicio:v,duracionTrade:String(cDur(v,f.horaFinal)||"")}))
+  const setHF=v=>setForm(f=>({...f,horaFinal:v,duracionTrade:String(cDur(f.horaInicio,v)||"")}))
+
+  const save=async()=>{if(!form.fecha)return alert("Fecha obligatoria");setSaving(true);const t={...form,semana:String(wom(form.fecha)),duracionTrade:String(cDur(form.horaInicio,form.horaFinal)||"")};if(t.resultado==="SL")t.rResultado="-1";if(t.resultado==="BE")t.rResultado="0";try{if(editId){await supa(`trades?id=eq.${editId}`,"PATCH",tradeToDb(t,user.id,appMode));setEditId(null)}else{await supa("trades","POST",tradeToDb(t,user.id,appMode))};await loadTrades()}catch(e){alert("Error")};setForm({...DT});setTab("trades");setSaving(false)}
+  const del=async id=>{if(!confirm("Eliminar?"))return;try{await supa(`trades?id=eq.${id}`,"DELETE");setAllTrades(ts=>ts.filter(t=>t.id!==id))}catch(e){alert("Error")}}
+  const edit=t=>{setForm({...DT,...t});setEditId(t.id);setTab("addTrade")}
+  const goTab=t=>{setTab(t);if(window.innerWidth<=900)setSb(false);if(t==="addTrade"&&!editId)setForm({...DT})}
+
+  const exportCSV=()=>{const h=["fecha","horaInicio","horaFinal","duracionTrade","atr","setup","contexto","buySell","puntosSlStr","rResultado","rMaximo","resultado","breakRangoM30","direccionDia","ddPuntos","hayNoticia","noticiaHora","noticiaImpacto","noticiaTipo","m5","m15","m30","notas"];const csv=[h.join(","),...trades.map(t=>h.map(k=>`"${t[k]||""}"`).join(","))].join("\n");const a=document.createElement("a");a.href=URL.createObjectURL(new Blob([csv],{type:"text/csv"}));a.download=`bt_journal_${appMode}.csv`;a.click()}
+  const importCSV=async e=>{const f=e.target.files[0];if(!f)return;const text=await f.text();const lines=text.split("\n").filter(Boolean);if(lines.length<2)return;const hd=lines[0].split(",").map(h=>h.replace(/"/g,"").trim());const imported=lines.slice(1).map(line=>{const vs=line.match(/(".*?"|[^",]+)/g)?.map(v=>v.replace(/"/g,"").trim())||[];const o={...DT};hd.forEach((h,i)=>{if(vs[i])o[h]=vs[i]});return o});setSaving(true);for(const t of imported){t.duracionTrade=String(cDur(t.horaInicio,t.horaFinal)||"");if(t.resultado==="SL")t.rResultado="-1";if(t.resultado==="BE")t.rResultado="0";await supa("trades","POST",tradeToDb(t,user.id,appMode))};await loadTrades();setSaving(false);alert(`${imported.length} trades importados a ${appMode.toUpperCase()}`);e.target.value=""}
+
+  // NT8 Import
+  const importNT8=async e=>{const f=e.target.files[0];if(!f)return;const text=await f.text();const parsed=parseNT8(text);if(!parsed.length)return alert("No se encontraron trades en el CSV");setSaving(true);for(const t of parsed){await supa("trades","POST",tradeToDb(t,user.id,"journal"))};await loadTrades();setSaving(false);alert(`${parsed.length} trades importados de NT8 al Journal`);if(appMode!=="journal")setAppMode("journal");e.target.value=""}
+
+  const handleFile=e=>{const f=e.target.files[0];if(!f)return;const r=new FileReader();r.onload=ev=>setForm(p=>({...p,screenshot:ev.target.result,screenshotPreview:ev.target.result}));r.readAsDataURL(f)}
+  const F=(l,n,type="text",opts)=>(<div className="field"><label>{l}</label>{opts?<select className="inp" value={form[n]||""} onChange={e=>setForm(f=>({...f,[n]:e.target.value}))}>{opts.map(o=><option key={o} value={o}>{o||"\u2014"}</option>)}</select>:<input className="inp" type={type} value={form[n]||""} onChange={e=>setForm(f=>({...f,[n]:e.target.value}))} step={type==="number"?"any":undefined}/>}</div>)
+
+  const filtered=useMemo(()=>{let ft=[...trades];if(fS!=="all")ft=ft.filter(t=>t.setup===fS);if(fN){const n=parseInt(fN);if(n)ft=ft.sort((a,b)=>new Date(b.fecha)-new Date(a.fecha)).slice(0,n)};if(fP!=="all"){const now=new Date();if(fP==="week"){const w=new Date(now-7*864e5);ft=ft.filter(t=>new Date(t.fecha)>=w)}else if(fP==="month")ft=ft.filter(t=>{const d=new Date(t.fecha);return d.getMonth()===now.getMonth()&&d.getFullYear()===now.getFullYear()});else if(fP==="year")ft=ft.filter(t=>new Date(t.fecha).getFullYear()===now.getFullYear())};return ft.sort((a,b)=>new Date(b.fecha)-new Date(a.fecha))},[trades,fP,fS,fN])
+
+  const stats=useMemo(()=>cS(filtered),[filtered])
+  const extra=useMemo(()=>extraS(filtered),[filtered])
+  const daily=useMemo(()=>grpBy(trades,t=>t.fecha),[trades])
+  const weekly=useMemo(()=>grpBy(trades,t=>t.fecha?`S${wom(t.fecha)} ${getMo(t.fecha)}`:""),[trades])
+  const monthly=useMemo(()=>grpBy(trades,t=>getMo(t.fecha)),[trades])
+  const yearly=useMemo(()=>grpBy(trades,t=>t.fecha?`20${getYr(t.fecha)}`:""),[trades])
+  const setupS=useMemo(()=>{const m={};SETUPS.forEach(s=>m[s]=cS(trades.filter(t=>t.setup===s)));return m},[trades])
+  const rTaken=useMemo(()=>rDist(filtered,"rResultado"),[filtered])
+  const rMx=useMemo(()=>rDist(filtered,"rMaximo"),[filtered])
+  const hStats=useMemo(()=>hourAnalysis(filtered),[filtered])
+  const atrS=useMemo(()=>atrAnalysis(filtered),[filtered])
+  const slS=useMemo(()=>slAnalysis(filtered),[filtered])
+  const tips=useMemo(()=>suggestions(filtered),[filtered])
+  const isWin=form.resultado==="WIN",autoDur=cDur(form.horaInicio,form.horaFinal),autoWeek=wom(form.fecha),ddPct=gDD(form)
+
+  const nav=[{id:"dashboard",l:"Dashboard",i:"\u25C8"},{id:"calendario",l:"Calendario",i:"\u25A6"},{id:"trades",l:"Trades",i:"\u2630"},{id:"addTrade",l:editId?"Editar":"Nuevo",i:"+"},{id:"estadisticas",l:"Stats",i:"\u25A5"},{id:"setups",l:"Setups",i:"\u25C6"},{id:"avanzado",l:"Avanzado",i:"\u25C9"},{id:"tips",l:"Tips",i:"\u2605"}]
+  const STable=({title,data,cols,row,chart})=>(<div className="card"><div className="st">{title}</div><div style={{display:"grid",gridTemplateColumns:chart?"minmax(0,1.3fr) minmax(0,1fr)":"1fr",gap:14}}><div style={{overflowX:"auto"}}><table className="tbl"><thead><tr>{cols.map(h=><th key={h}>{h}</th>)}</tr></thead><tbody>{data.map((d,i)=><tr key={i}>{row(d).map((c,j)=>{if(Array.isArray(c))return<td key={j} className={`mono ${c[1]} ${c[2]?"bold":""}`}>{c[0]}</td>;return<td key={j} className="mono">{c}</td>})}</tr>)}</tbody></table>{!data.length&&<div className="em">Sin datos</div>}</div>{chart&&<BC data={chart.slice(0,12).reverse().map(w2=>w2.totalR)} labels={chart.slice(0,12).reverse().map(w2=>w2.key)} unit="R"/>}</div></div>)
+  const Filters=()=><div style={{display:"flex",gap:5,flexWrap:"wrap",alignItems:"center"}}><select className="inp" style={{width:"auto"}} value={fS} onChange={e=>setFS(e.target.value)}><option value="all">All</option>{SETUPS.map(s=><option key={s} value={s}>{s}</option>)}</select><div className="pb">{["all","week","month","year"].map(p=><button key={p} className={`pbtn ${fP===p?"active":""}`} onClick={()=>setFP(p)}>{{all:"All",week:"7d",month:"Mes",year:"Yr"}[p]}</button>)}</div><select className="inp" style={{width:"auto"}} value={fN} onChange={e=>setFN(e.target.value)}><option value="">All</option><option value="10">10</option><option value="20">20</option><option value="50">50</option></select></div>
+
+  if(loading)return<div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:"var(--bg)",color:"var(--accent)",fontFamily:"var(--mono)"}}>Cargando...</div>
+
+const HOURS=[];for(let h=0;h<24;h++)for(let m=0;m<60;m++)HOURS.push(`${String(h).padStart(2,"0")}:${String(m).padStart(2,"0")}`)
+const TP=({value,onChange,label})=>(<div className="field"><label>{label}</label><select className="inp" value={value} onChange={e=>onChange(e.target.value)}>{HOURS.map(h=><option key={h} value={h}>{h}</option>)}</select></div>)
+const Met=({label,value,sub,color,big})=>(<div className="mc"><div className="ml">{label}</div><div className={`mv${big?" big":""}`} style={{color}}>{value}</div>{sub&&<div className="ms">{sub}</div>}</div>)
+const RT=({res})=><span className={`tag ${res==="SL"?"tr":res==="BE"?"ty":"tg"}`}>{res}</span>
+const DT2=({dir})=><span className={`tag ${dir==="ALCISTA"?"tg":dir==="BAJISTA"?"tr":"ty"}`}>{dir}</span>
+const ST=({s})=><span className="tag ta">{s}</span>
+const BT2=({bs})=><span className={`tag ${bs==="BUY"?"tg":"tr"}`}>{bs}</span>
+const EC=({trades})=>{if(trades.length<2)return<div className="em">Min 2</div>;const sorted=[...trades].sort((a,b)=>new Date(a.fecha)-new Date(b.fecha));let cum=0;const pts=[0,...sorted.map(t=>(cum+=gR(t),Math.round(cum*100)/100))];const mn=Math.min(...pts),mx=Math.max(...pts),rng=mx-mn||1,w=600,h=180,p=40,tx=i=>p+(i/(pts.length-1))*(w-p*2),ty=v=>h-p-((v-mn)/rng)*(h-p*2);const line=pts.map((v,i)=>`${i===0?"M":"L"} ${tx(i).toFixed(1)} ${ty(v).toFixed(1)}`).join(" ");const area=line+` L ${tx(pts.length-1).toFixed(1)} ${ty(mn).toFixed(1)} L ${tx(0).toFixed(1)} ${ty(mn).toFixed(1)} Z`;const col=cum>=0?"var(--green)":"var(--red)";return<svg viewBox={`0 0 ${w} ${h}`} style={{width:"100%",display:"block"}}><defs><linearGradient id="eF" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={col} stopOpacity={.25}/><stop offset="100%" stopColor={col} stopOpacity={0}/></linearGradient></defs>{[0,.25,.5,.75,1].map((pc,i)=>{const y=ty(mn+pc*rng);return<g key={i}><line x1={p} y1={y} x2={w-p} y2={y} stroke="var(--border)" strokeWidth={.5} strokeDasharray="4 4"/><text x={p-6} y={y+4} textAnchor="end" fill="var(--text3)" fontSize={10} fontFamily="var(--mono)">{Math.round((mn+pc*rng)*10)/10}R</text></g>})}<path d={area} fill="url(#eF)"/><path d={line} fill="none" stroke={col} strokeWidth={2.5} strokeLinejoin="round"/><circle cx={tx(pts.length-1)} cy={ty(pts[pts.length-1])} r={4} fill={col}/></svg>}
+const BC=({data,labels,height=130,unit="",colors})=>{if(!data.length||data.every(v=>v===0))return<div className="em">Sin datos</div>;const max=Math.max(...data.map(Math.abs),.1),bw=Math.min(44,Math.max(18,300/data.length)),tw=data.length*(bw+6)+16,bl=height-12;return<div style={{overflowX:"auto"}}><svg width={Math.max(tw,200)} height={height+28}><line x1={8} y1={bl} x2={tw} y2={bl} stroke="var(--border)" strokeWidth={1}/>{data.map((v,i)=>{const bh=Math.abs(v)/max*(height-30),x=i*(bw+6)+12,pos=v>=0,y=pos?bl-bh:bl,fill=colors?colors[i]:pos?"var(--green)":"var(--red)";return<g key={i}><rect x={x} y={y} width={bw} height={Math.max(bh,2)} rx={3} fill={fill} opacity={.85}/><text x={x+bw/2} y={pos?y-4:y+bh+12} textAnchor="middle" fill="var(--text2)" fontSize={9} fontFamily="var(--mono)">{Math.round(v*10)/10}{unit}</text><text x={x+bw/2} y={height+22} textAnchor="middle" fill="var(--text3)" fontSize={8} fontFamily="var(--mono)">{labels?.[i]}</text></g>})}</svg></div>}
+
+function LoginScreen({onLogin}){const[user,setUser]=useState(""),[ pass,setPass]=useState(""),[mode,setMode]=useState("login"),[err,setErr]=useState(""),[ld,setLd]=useState(false);const go=async(isReg)=>{if(!user||!pass)return setErr("Completa ambos campos");setLd(true);setErr("");try{if(isReg){if(user.length<3)return setErr("Min 3 chars");const ex=await db(`users?username=eq.${encodeURIComponent(user)}&select=id`);if(ex.length){setLd(false);return setErr("Ya existe")}const r=await db("users","POST",{username:user,password:pass});if(r.length){localStorage.setItem("bt_user",JSON.stringify({id:r[0].id,username:r[0].username}));onLogin(r[0])}else setErr("Error")}else{const u=await db(`users?username=eq.${encodeURIComponent(user)}&select=*`);if(!u.length){setLd(false);return setErr("No existe")}if(u[0].password!==pass){setLd(false);return setErr("Contrasena incorrecta")}localStorage.setItem("bt_user",JSON.stringify({id:u[0].id,username:u[0].username}));onLogin(u[0])}}catch(e){setErr("Error conexion")}setLd(false)};return<div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:"var(--bg)",fontFamily:"var(--font)"}}><div style={{width:340,background:"var(--surface)",border:"1px solid var(--border)",borderRadius:14,padding:28}}><h1 style={{fontSize:22,fontWeight:700,color:"var(--accent)",textAlign:"center",fontFamily:"var(--mono)"}}>BT Journal</h1><p style={{textAlign:"center",color:"var(--text3)",fontSize:11,marginBottom:24,fontFamily:"var(--mono)"}}>Backtesting & Journal</p><div style={{display:"flex",gap:3,marginBottom:18,background:"var(--bg)",borderRadius:7,padding:2}}><button onClick={()=>{setMode("login");setErr("")}} style={{flex:1,padding:7,border:"none",borderRadius:5,cursor:"pointer",fontSize:12,fontWeight:600,background:mode==="login"?"var(--ad)":"transparent",color:mode==="login"?"var(--accent)":"var(--text3)",fontFamily:"inherit"}}>Entrar</button><button onClick={()=>{setMode("register");setErr("")}} style={{flex:1,padding:7,border:"none",borderRadius:5,cursor:"pointer",fontSize:12,fontWeight:600,background:mode==="register"?"var(--ad)":"transparent",color:mode==="register"?"var(--accent)":"var(--text3)",fontFamily:"inherit"}}>Registro</button></div><div style={{display:"flex",flexDirection:"column",gap:10}}><div className="field"><label>Usuario</label><input className="inp" value={user} onChange={e=>setUser(e.target.value.toLowerCase().trim())} onKeyDown={e=>e.key==="Enter"&&go(mode==="register")}/></div><div className="field"><label>Contrasena</label><input className="inp" type="password" value={pass} onChange={e=>setPass(e.target.value)} onKeyDown={e=>e.key==="Enter"&&go(mode==="register")}/></div>{err&&<div style={{color:"var(--red)",fontSize:11,fontFamily:"var(--mono)",textAlign:"center"}}>{err}</div>}<button className="btn bp" style={{width:"100%",opacity:ld?.5:1}} onClick={()=>go(mode==="register")} disabled={ld}>{ld?"...":(mode==="login"?"Entrar":"Crear cuenta")}</button></div></div></div>}
+
+const Calendar=({trades,month,year,onPrev,onNext})=>{const dim=new Date(year,month+1,0).getDate(),fd=new Date(year,month,1).getDay(),mn=new Date(year,month).toLocaleString("es",{month:"long",year:"numeric"});const byD={};trades.forEach(t=>{if(!t.fecha)return;const d=new Date(t.fecha);if(d.getMonth()===month&&d.getFullYear()===year)(byD[d.getDate()]??=[]).push(t)});const cells=[];for(let i=0;i<fd;i++)cells.push(null);for(let d=1;d<=dim;d++)cells.push(d);const weeks=[];for(let i=0;i<cells.length;i+=7)weeks.push(cells.slice(i,i+7));const ws=weeks.map(wk=>{let r=0,c=0;wk.forEach(d=>{if(d&&byD[d])byD[d].forEach(t=>{r+=gR(t);c++})});return{r:Math.round(r*100)/100,c}});const mt=trades.filter(t=>{if(!t.fecha)return false;const d=new Date(t.fecha);return d.getMonth()===month&&d.getFullYear()===year});const mr=Math.round(mt.reduce((a,t)=>a+gR(t),0)*100)/100;return<div className="card" style={{padding:0,overflow:"hidden"}}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"12px 16px",borderBottom:"1px solid var(--border)"}}><span style={{fontFamily:"var(--mono)",fontWeight:700,fontSize:14,textTransform:"capitalize"}}>{mn}</span><div style={{display:"flex",gap:5}}><button className="btn bo bx" onClick={onPrev}>&lt;</button><button className="btn bo bx" onClick={onNext}>&gt;</button></div></div><div style={{display:"grid",gridTemplateColumns:"repeat(8,1fr)",fontSize:9,fontFamily:"var(--mono)"}}>{["Do","Lu","Ma","Mi","Ju","Vi","Sa","Sem"].map(d=><div key={d} style={{padding:"7px 3px",textAlign:"center",color:"var(--text3)",borderBottom:"1px solid var(--border)",fontWeight:600}}>{d}</div>)}{weeks.map((wk,wi)=><React.Fragment key={wi}>{wk.map((d,di)=>{if(!d)return<div key={di} style={{padding:8,borderBottom:"1px solid var(--border)",background:"var(--bg)"}}/>;const dt=byD[d]||[],dr=Math.round(dt.reduce((a,t)=>a+gR(t),0)*100)/100,bg=dt.length?dr>0?"rgba(0,214,143,.08)":dr<0?"rgba(255,71,87,.08)":"var(--surface)":"var(--surface)";return<div key={di} style={{padding:"5px 3px",borderBottom:"1px solid var(--border)",borderRight:"1px solid var(--border)",background:bg,minHeight:50}}><div style={{fontSize:8,color:"var(--text3)",marginBottom:2}}>{d}</div>{dt.length?<><div style={{fontSize:12,fontWeight:700,color:dr>0?"var(--green)":dr<0?"var(--red)":"var(--yellow)",fontFamily:"var(--mono)"}}>{fmt$(dr*RV)}</div><div style={{fontSize:7,color:"var(--text3)"}}>{dt.length}t</div></>:<div style={{fontSize:7,color:"var(--text3)"}}>-</div>}</div>})}{Array(Math.max(0,7-wk.length)).fill(null).map((_,i)=><div key={`p${i}`} style={{padding:8,borderBottom:"1px solid var(--border)",background:"var(--bg)"}}/>)}<div style={{padding:"5px 3px",borderBottom:"1px solid var(--border)",background:"var(--surface2)",display:"flex",flexDirection:"column",justifyContent:"center",alignItems:"center"}}><div style={{fontSize:7,color:"var(--text3)"}}>S{wi+1}</div><div style={{fontSize:11,fontWeight:700,color:ws[wi].r>0?"var(--green)":ws[wi].r<0?"var(--red)":"var(--text3)",fontFamily:"var(--mono)"}}>{ws[wi].c?fmt$(ws[wi].r*RV):"-"}</div></div></React.Fragment>)}</div><div style={{display:"flex",justifyContent:"flex-end",gap:14,padding:"8px 16px",borderTop:"1px solid var(--border)",background:"var(--surface2)"}}><span style={{fontSize:10,color:"var(--text3)",fontFamily:"var(--mono)"}}>N:<b style={{color:"var(--text)"}}>{mt.length}</b></span><span style={{fontSize:10,color:"var(--text3)",fontFamily:"var(--mono)"}}>P&L:<b style={{color:mr>=0?"var(--green)":"var(--red)"}}>{mr>=0?"+":""}{fmt$(mr*RV)}</b></span></div></div>}
+
+function Journal({user,onLogout}){
+  const[allTrades,setAllTrades]=useState([])
+  const[loading,setLoading]=useState(true)
+  const[appMode,setAppMode]=useState("bt")
+  const[tab,setTab]=useState("dashboard")
+  const[form,setForm]=useState({...DT})
+  const[editId,setEditId]=useState(null)
+  const[fP,setFP]=useState("all")
+  const[fS,setFS]=useState("all")
+  const[fN,setFN]=useState("")
+  const[viewSS,setViewSS]=useState(null)
+  const[sidebar,setSidebar]=useState(window.innerWidth>900)
+  const[calM,setCalM]=useState(new Date().getMonth())
+  const[calY,setCalY]=useState(new Date().getFullYear())
+  const[saving,setSaving]=useState(false)
+  const fRef=useRef(),nt8Ref=useRef()
+
+  const loadTrades=useCallback(async()=>{try{const d=await db(`trades?user_id=eq.${user.id}&select=*&order=created_at.desc`);setAllTrades((d||[]).map(db2t))}catch(e){console.error(e)};setLoading(false)},[user.id])
+  useEffect(()=>{loadTrades()},[loadTrades])
+  useEffect(()=>{const fn=()=>setSidebar(window.innerWidth>900);window.addEventListener("resize",fn);return()=>window.removeEventListener("resize",fn)},[])
+
+  // Filter by mode (bt vs journal)
+  const modeTrades=useMemo(()=>allTrades.filter(t=>(t.mode||"bt")===appMode),[allTrades,appMode])
+
+  const setHI=v=>setForm(f=>({...f,horaInicio:v,duracionTrade:String(cDur(v,f.horaFinal)||"")}))
+  const setHF=v=>setForm(f=>({...f,horaFinal:v,duracionTrade:String(cDur(f.horaInicio,v)||"")}))
+
+  const filtered=useMemo(()=>{let ft=[...modeTrades];if(fS!=="all")ft=ft.filter(t=>t.setup===fS);if(fN){const n=parseInt(fN);if(n)ft=ft.slice(0,n)}if(fP!=="all"){const now=new Date();if(fP==="week"){const w=new Date(now-7*864e5);ft=ft.filter(t=>new Date(t.fecha)>=w)}else if(fP==="month")ft=ft.filter(t=>{const d=new Date(t.fecha);return d.getMonth()===now.getMonth()&&d.getFullYear()===now.getFullYear()});else if(fP==="year")ft=ft.filter(t=>new Date(t.fecha).getFullYear()===now.getFullYear())}return ft.sort((a,b)=>new Date(b.fecha)-new Date(a.fecha))},[modeTrades,fP,fS,fN])
+
+  const stats=useMemo(()=>cS(filtered),[filtered])
+  const extra=useMemo(()=>extraS(filtered),[filtered])
+  const daily=useMemo(()=>grpBy(modeTrades,t=>t.fecha),[modeTrades])
+  const weekly=useMemo(()=>grpBy(modeTrades,t=>t.fecha?`S${wom(t.fecha)} ${getMo(t.fecha)}`:""),[modeTrades])
+  const monthly=useMemo(()=>grpBy(modeTrades,t=>getMo(t.fecha)),[modeTrades])
+  const yearly=useMemo(()=>grpBy(modeTrades,t=>t.fecha?`20${getYr(t.fecha)}`:""),[modeTrades])
+  const setupS=useMemo(()=>{const m={};SETUPS.forEach(s=>m[s]=cS(modeTrades.filter(t=>t.setup===s)));return m},[modeTrades])
+  const rTaken=useMemo(()=>rDist(filtered,"rResultado"),[filtered])
+  const rMx=useMemo(()=>rDist(filtered,"rMaximo"),[filtered])
+  const hStats=useMemo(()=>hourAn(filtered),[filtered])
+  const atrS=useMemo(()=>atrAn(filtered),[filtered])
+  const slS=useMemo(()=>slAn(filtered),[filtered])
+  const tipsList=useMemo(()=>tips(filtered),[filtered])
+
+  const save=async()=>{if(!form.fecha)return alert("Fecha obligatoria");setSaving(true);const t={...form,semana:String(wom(form.fecha)),duracionTrade:String(cDur(form.horaInicio,form.horaFinal)||"")};if(t.resultado==="SL")t.rResultado="-1";if(t.resultado==="BE")t.rResultado="0";try{if(editId){await db(`trades?id=eq.${editId}`,"PATCH",t2db(t,user.id,appMode));setEditId(null)}else{await db("trades","POST",t2db(t,user.id,appMode))}await loadTrades()}catch(e){alert("Error")}setForm({...DT});setTab("trades");setSaving(false)}
+  const del=async id=>{if(!confirm("Eliminar?"))return;try{await db(`trades?id=eq.${id}`,"DELETE");setAllTrades(ts=>ts.filter(t=>t.id!==id))}catch(e){alert("Error")}}
+  const edit=t=>{setForm({...DT,...t});setEditId(t.id);setTab("addTrade")}
+  const goTab=t=>{setTab(t);if(window.innerWidth<=900)setSidebar(false);if(t==="addTrade"&&!editId)setForm({...DT})}
+
+  const exportCSV=()=>{const h=["fecha","horaInicio","horaFinal","duracionTrade","atr","setup","contexto","buySell","puntosSlStr","rResultado","rMaximo","resultado","breakRangoM30","direccionDia","ddPuntos","hayNoticia","noticiaHora","noticiaImpacto","noticiaTipo","m5","m15","m30","notas"];const csv=[h.join(","),...modeTrades.map(t=>h.map(k=>`"${t[k]||""}"`).join(","))].join("\n");const a=document.createElement("a");a.href=URL.createObjectURL(new Blob([csv],{type:"text/csv"}));a.download=`${appMode}_journal.csv`;a.click()}
+
+  const importCSV=async e=>{const f=e.target.files[0];if(!f)return;const text=await f.text();const lines=text.split("\n").filter(Boolean);if(lines.length<2)return;const hd=lines[0].split(",").map(h=>h.replace(/"/g,"").trim());const imported=lines.slice(1).map(line=>{const vs=line.match(/(".*?"|[^",]+)/g)?.map(v=>v.replace(/"/g,"").trim())||[];const o={...DT};hd.forEach((h,i)=>{if(vs[i])o[h]=vs[i]});return o});setSaving(true);for(const t of imported){t.duracionTrade=String(cDur(t.horaInicio,t.horaFinal)||"");if(t.resultado==="SL")t.rResultado="-1";if(t.resultado==="BE")t.rResultado="0";await db("trades","POST",t2db(t,user.id,appMode))}await loadTrades();setSaving(false);alert(`${imported.length} trades importados`);e.target.value=""}
+
+  const importNT8=async e=>{const f=e.target.files[0];if(!f)return;const text=await f.text();const parsed=parseNT8(text);if(!parsed.length)return alert("No se encontraron trades en el CSV");setSaving(true);for(const t of parsed){await db("trades","POST",t2db(t,user.id,"journal"))}await loadTrades();setSaving(false);setAppMode("journal");alert(`${parsed.length} trades importados de NT8`);e.target.value=""}
+
+  const handleFile=e=>{const f=e.target.files[0];if(!f)return;const r=new FileReader();r.onload=ev=>setForm(p=>({...p,screenshot:ev.target.result,screenshotPreview:ev.target.result}));r.readAsDataURL(f)}
+  const F=(l,n,type="text",opts)=>(<div className="field"><label>{l}</label>{opts?<select className="inp" value={form[n]||""} onChange={e=>setForm(f=>({...f,[n]:e.target.value}))}>{opts.map(o=><option key={o} value={o}>{o||"—"}</option>)}</select>:<input className="inp" type={type} value={form[n]||""} onChange={e=>setForm(f=>({...f,[n]:e.target.value}))} step={type==="number"?"any":undefined}/>}</div>)
+
+  const isWin=form.resultado==="WIN",autoDur=cDur(form.horaInicio,form.horaFinal),autoWeek=wom(form.fecha),ddPct=gDD(form)
+  const nav=[{id:"dashboard",l:"Dashboard",i:"\u25C8"},{id:"calendario",l:"Calendario",i:"\u25A6"},{id:"trades",l:"Trades",i:"\u2630"},{id:"addTrade",l:editId?"Editar":"Nuevo",i:"+"},{id:"estadisticas",l:"Stats",i:"\u25A5"},{id:"setups",l:"Setups",i:"\u25C6"},{id:"avanzado",l:"Avanzado",i:"\u25C9"},{id:"tips",l:"Tips",i:"\u2605"}]
+  const STable=({title,data,cols,row,chart})=>(<div className="card"><div className="st">{title}</div><div style={{display:"grid",gridTemplateColumns:chart?"minmax(0,1.3fr) minmax(0,1fr)":"1fr",gap:14}}><div style={{overflowX:"auto"}}><table className="tbl"><thead><tr>{cols.map(h=><th key={h}>{h}</th>)}</tr></thead><tbody>{data.map((d,i)=><tr key={i}>{row(d).map((c,j)=>{if(Array.isArray(c))return<td key={j} className={`mono ${c[1]} ${c[2]?"bold":""}`}>{c[0]}</td>;return<td key={j} className="mono">{c}</td>})}</tr>)}</tbody></table>{!data.length&&<div className="em">Sin datos</div>}</div>{chart&&<BC data={chart.slice(0,12).reverse().map(w=>w.totalR)} labels={chart.slice(0,12).reverse().map(w=>w.key)} unit="R"/>}</div></div>)
+  const Filters=()=><div style={{display:"flex",gap:5,flexWrap:"wrap",alignItems:"center"}}><select className="inp" style={{width:"auto"}} value={fS} onChange={e=>setFS(e.target.value)}><option value="all">All</option>{SETUPS.map(s=><option key={s} value={s}>{s}</option>)}</select><div className="pb">{["all","week","month","year"].map(p=><button key={p} className={`pbtn ${fP===p?"active":""}`} onClick={()=>setFP(p)}>{{all:"All",week:"7d",month:"Mes",year:"Yr"}[p]}</button>)}</div><select className="inp" style={{width:"auto"}} value={fN} onChange={e=>setFN(e.target.value)}><option value="">All</option><option value="10">10</option><option value="20">20</option><option value="50">50</option></select></div>
+
+  if(loading)return<div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:"var(--bg)",color:"var(--accent)",fontFamily:"var(--mono)"}}>Cargando...</div>
+
+  return(<>
+    <style>{`@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');:root{--bg:#0a0e14;--surface:#12171f;--surface2:#1a2030;--border:#1e2738;--border2:#2a3548;--text:#d4dae4;--text2:#8892a4;--text3:#5a6478;--accent:#4c9aff;--accent2:#2d7adf;--ad:rgba(76,154,255,.12);--green:#00d68f;--gd:rgba(0,214,143,.12);--red:#ff4757;--rd:rgba(255,71,87,.12);--yellow:#ffc048;--yd:rgba(255,192,72,.12);--purple:#a78bfa;--pd:rgba(167,139,250,.12);--font:'DM Sans',sans-serif;--mono:'JetBrains Mono',monospace;--radius:10px;--rlg:14px}*{box-sizing:border-box;margin:0;padding:0}body{background:var(--bg);color:var(--text);font-family:var(--font);font-size:14px;-webkit-font-smoothing:antialiased}::-webkit-scrollbar{width:6px;height:6px}::-webkit-scrollbar-track{background:transparent}::-webkit-scrollbar-thumb{background:var(--border2);border-radius:3px}.shell{display:flex;min-height:100vh}.sidebar{width:240px;background:var(--surface);border-right:1px solid var(--border);position:fixed;top:0;left:0;bottom:0;display:flex;flex-direction:column;z-index:100;transition:transform .25s}.sidebar.closed{transform:translateX(-240px)}.main{margin-left:240px;padding:24px 28px 60px;flex:1;min-width:0}.main.full{margin-left:0}.mobile-bar{display:none;position:fixed;top:0;left:0;right:0;height:50px;background:var(--surface);border-bottom:1px solid var(--border);z-index:101;align-items:center;padding:0 14px;justify-content:space-between}@media(max-width:900px){.mobile-bar{display:flex}.main{margin-left:0;padding:58px 12px 40px}.sidebar{transform:translateX(-240px)}.sidebar.open{transform:translateX(0)}}.overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:99}.ss-modal{position:fixed;inset:0;background:rgba(0,0,0,.9);z-index:9999;display:flex;align-items:center;justify-content:center;cursor:pointer}.ss-modal img{max-width:92vw;max-height:92vh;border-radius:8px}.sb-brand{padding:18px 14px 14px;border-bottom:1px solid var(--border)}.sb-brand h1{font-size:17px;font-weight:700;color:var(--accent)}.sb-brand p{font-size:9px;color:var(--text3);margin-top:2px;font-family:var(--mono);text-transform:uppercase;letter-spacing:1px}.sb-nav{flex:1;padding:6px;display:flex;flex-direction:column;gap:1px;overflow-y:auto}.sb-btn{display:flex;align-items:center;gap:8px;width:100%;padding:8px 10px;background:transparent;color:var(--text2);border:none;cursor:pointer;font:inherit;font-size:11px;font-weight:500;border-radius:6px;text-align:left}.sb-btn:hover{background:var(--surface2);color:var(--text)}.sb-btn.active{background:var(--ad);color:var(--accent)}.sb-footer{padding:10px;border-top:1px solid var(--border);display:flex;flex-direction:column;gap:4px}.sb-footer button,.sb-footer label{display:block;width:100%;padding:7px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text2);font:inherit;font-size:10px;cursor:pointer;text-align:center}.sb-footer button:hover,.sb-footer label:hover{background:var(--border);color:var(--text)}.pt{font-size:20px;font-weight:700;letter-spacing:-.5px}.ps{color:var(--text2);font-size:11px;margin-top:2px}.st{font-size:10px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:.8px;margin-bottom:12px;font-family:var(--mono)}.card{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:16px;margin-bottom:12px}.ch{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}.metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px;margin-bottom:14px}.mc{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:12px}.ml{font-size:9px;color:var(--text3);font-weight:600;text-transform:uppercase;letter-spacing:.6px;font-family:var(--mono);margin-bottom:4px}.mv{font-size:17px;font-weight:700;font-family:var(--mono);letter-spacing:-.5px;line-height:1}.mv.big{font-size:22px}.ms{font-size:8px;color:var(--text3);margin-top:3px;font-family:var(--mono)}.tag{display:inline-block;padding:2px 6px;border-radius:4px;font-size:9px;font-weight:600;font-family:var(--mono)}.tg{background:var(--gd);color:var(--green)}.tr{background:var(--rd);color:var(--red)}.ty{background:var(--yd);color:var(--yellow)}.ta{background:var(--ad);color:var(--accent)}.tp{background:var(--pd);color:var(--purple)}.tbl{width:100%;border-collapse:collapse;font-size:11px}.tbl th{text-align:left;padding:6px 7px;border-bottom:1px solid var(--border);color:var(--text3);font-weight:600;font-size:8px;text-transform:uppercase;letter-spacing:.6px;font-family:var(--mono);white-space:nowrap}.tbl td{padding:6px 7px;border-bottom:1px solid var(--border)}.tbl tr:hover td{background:var(--surface2)}.tbl .mono{font-family:var(--mono)}.tbl .g{color:var(--green)}.tbl .r{color:var(--red)}.tbl .y{color:var(--yellow)}.tbl .bold{font-weight:600}.form-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}.field{display:flex;flex-direction:column;gap:3px}.field label{font-size:8px;color:var(--text3);text-transform:uppercase;letter-spacing:.6px;font-weight:600;font-family:var(--mono)}.inp{background:var(--bg);border:1px solid var(--border2);border-radius:6px;color:var(--text);padding:8px 9px;font:inherit;font-size:12px;width:100%;outline:none}.inp:focus{border-color:var(--accent)}select.inp{cursor:pointer;appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 24 24' fill='none' stroke='%235a6478' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 8px center;padding-right:24px}textarea.inp{resize:vertical;min-height:80px}input[type="date"]::-webkit-calendar-picker-indicator{filter:invert(.6)}.btn{border:none;border-radius:6px;padding:7px 16px;font:inherit;font-size:11px;font-weight:600;cursor:pointer}.bp{background:var(--accent);color:#fff}.bp:hover{background:var(--accent2)}.bo{background:transparent;color:var(--text2);border:1px solid var(--border2)}.bo:hover{background:var(--surface2)}.bd{background:var(--rd);color:var(--red)}.bs{padding:4px 9px;font-size:10px}.bx{padding:3px 5px;font-size:8px}.pb{display:flex;gap:2px;background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:2px}.pbtn{padding:4px 9px;border:none;background:transparent;color:var(--text3);font:inherit;font-size:10px;cursor:pointer;border-radius:4px}.pbtn.active{background:var(--ad);color:var(--accent)}.em{text-align:center;padding:18px;color:var(--text3);font-size:11px}.g2{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:12px}.g3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}@media(max-width:700px){.g2,.g3{grid-template-columns:1fr}}.uz{border:2px dashed var(--border2);border-radius:8px;padding:18px;text-align:center;cursor:pointer;color:var(--text3);display:flex;flex-direction:column;align-items:center;gap:4px;min-height:60px}.uz:hover{border-color:var(--accent)}.uz img{max-width:100%;max-height:100px;border-radius:6px}.sc{border-left:3px solid var(--border2)}.sc.profit{border-left-color:var(--green)}.sc.loss{border-left-color:var(--red)}.af{background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:8px 9px;font-family:var(--mono);font-size:12px;color:var(--accent)}.info-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:8px;margin-top:10px}.info-item{background:var(--bg);border-radius:6px;padding:10px}.info-item .val{font-family:var(--mono);font-weight:600;font-size:11px;margin-top:3px}.tip-card{padding:10px 12px;border-radius:6px;margin-bottom:6px;font-size:11px;display:flex;align-items:flex-start;gap:8px}.tip-card .dot{width:6px;height:6px;border-radius:50%;flex-shrink:0;margin-top:4px}.mode-toggle{display:flex;gap:3px;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:3px;margin-bottom:14px}.mode-btn{flex:1;padding:8px;border:none;border-radius:6px;cursor:pointer;font:inherit;font-size:12px;font-weight:600;text-align:center;transition:all .15s}@keyframes fadeIn{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}.card,.mc{animation:fadeIn .25s ease both}`}</style>
+    <div className="shell">
+      {viewSS&&<div className="ss-modal" onClick={()=>setViewSS(null)}><img src={viewSS}/></div>}
+      {sidebar&&window.innerWidth<=900&&<div className="overlay" onClick={()=>setSidebar(false)}/>}
+      <div className="mobile-bar"><button onClick={()=>setSidebar(!sidebar)} style={{background:"none",border:"none",color:"var(--text)",fontSize:16,cursor:"pointer"}}>{"\u2630"}</button><span style={{fontWeight:700,color:"var(--accent)",fontFamily:"var(--mono)",fontSize:12}}>BT JOURNAL</span><div style={{width:24}}/></div>
+      <div className={`sidebar ${sidebar?"open":"closed"}`}>
+        <div className="sb-brand"><h1>BT Journal</h1><p>{user.username}</p></div>
+        {/* MODE TOGGLE */}
+        <div style={{padding:"10px 10px 0"}}>
+          <div className="mode-toggle">
+            <button className="mode-btn" style={{background:appMode==="bt"?"var(--ad)":"transparent",color:appMode==="bt"?"var(--accent)":"var(--text3)"}} onClick={()=>{setAppMode("bt");setTab("dashboard")}}>Backtesting</button>
+            <button className="mode-btn" style={{background:appMode==="journal"?"var(--gd)":"transparent",color:appMode==="journal"?"var(--green)":"var(--text3)"}} onClick={()=>{setAppMode("journal");setTab("dashboard")}}>Journal</button>
+          </div>
+        </div>
+        <nav className="sb-nav">{nav.map(n=><button key={n.id} className={`sb-btn ${tab===n.id?"active":""}`} onClick={()=>goTab(n.id)}><span style={{fontFamily:"var(--mono)",fontSize:12,width:14,textAlign:"center"}}>{n.i}</span><span>{n.l}</span></button>)}</nav>
+        <div className="sb-footer">
+          <button onClick={exportCSV}>Exportar CSV</button>
+          <label>Importar CSV<input type="file" accept=".csv" onChange={importCSV} style={{display:"none"}}/></label>
+          {appMode==="journal"&&<label style={{background:"var(--gd)",color:"var(--green)",border:"1px solid var(--green)"}}>Importar NT8<input ref={nt8Ref} type="file" accept=".csv" onChange={importNT8} style={{display:"none"}}/></label>}
+          <button onClick={onLogout} style={{color:"var(--red)"}}>Salir</button>
+        </div>
+      </div>
+      <div className={`main ${!sidebar||window.innerWidth<=900?"full":""}`}>
+      {saving&&<div style={{position:"fixed",top:0,left:0,right:0,height:3,background:appMode==="bt"?"var(--accent)":"var(--green)",zIndex:999}}/>}
+      <div style={{display:"inline-block",padding:"3px 10px",borderRadius:5,fontSize:9,fontWeight:600,fontFamily:"var(--mono)",background:appMode==="bt"?"var(--ad)":"var(--gd)",color:appMode==="bt"?"var(--accent)":"var(--green)",marginBottom:10}}>{appMode==="bt"?"BACKTESTING":"JOURNAL (Live)"}</div>
+
+  return(<>
+    <style>{`@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');:root{--bg:#0a0e14;--surface:#12171f;--surface2:#1a2030;--border:#1e2738;--border2:#2a3548;--text:#d4dae4;--text2:#8892a4;--text3:#5a6478;--accent:#4c9aff;--accent2:#2d7adf;--ad:rgba(76,154,255,.12);--green:#00d68f;--gd:rgba(0,214,143,.12);--red:#ff4757;--rd:rgba(255,71,87,.12);--yellow:#ffc048;--yd:rgba(255,192,72,.12);--purple:#a78bfa;--pd:rgba(167,139,250,.12);--font:'DM Sans',sans-serif;--mono:'JetBrains Mono',monospace;--radius:10px;--rlg:14px}*{box-sizing:border-box;margin:0;padding:0}body{background:var(--bg);color:var(--text);font-family:var(--font);font-size:14px;-webkit-font-smoothing:antialiased}::-webkit-scrollbar{width:6px;height:6px}::-webkit-scrollbar-track{background:transparent}::-webkit-scrollbar-thumb{background:var(--border2);border-radius:3px}.shell{display:flex;min-height:100vh}.sidebar{width:240px;background:var(--surface);border-right:1px solid var(--border);position:fixed;top:0;left:0;bottom:0;display:flex;flex-direction:column;z-index:100;transition:transform .25s}.sidebar.closed{transform:translateX(-240px)}.main{margin-left:240px;padding:24px 30px 60px;flex:1;min-width:0}.main.full{margin-left:0}.mobile-bar{display:none;position:fixed;top:0;left:0;right:0;height:50px;background:var(--surface);border-bottom:1px solid var(--border);z-index:101;align-items:center;padding:0 14px;justify-content:space-between}@media(max-width:900px){.mobile-bar{display:flex}.main{margin-left:0;padding:58px 12px 40px}.sidebar{transform:translateX(-240px)}.sidebar.open{transform:translateX(0)}}.overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:99}.ss-modal{position:fixed;inset:0;background:rgba(0,0,0,.9);z-index:9999;display:flex;align-items:center;justify-content:center;cursor:pointer}.ss-modal img{max-width:92vw;max-height:92vh;border-radius:8px}.sb-brand{padding:18px 14px 14px;border-bottom:1px solid var(--border)}.sb-brand h1{font-size:17px;font-weight:700;color:var(--accent)}.sb-brand p{font-size:10px;color:var(--text3);margin-top:2px;font-family:var(--mono)}.sb-nav{flex:1;padding:6px;display:flex;flex-direction:column;gap:1px;overflow-y:auto}.sb-btn{display:flex;align-items:center;gap:9px;width:100%;padding:8px 11px;background:transparent;color:var(--text2);border:none;cursor:pointer;font:inherit;font-size:11px;font-weight:500;border-radius:6px;text-align:left}.sb-btn:hover{background:var(--surface2);color:var(--text)}.sb-btn.active{background:var(--ad);color:var(--accent)}.sb-footer{padding:10px;border-top:1px solid var(--border);display:flex;flex-direction:column;gap:4px}.sb-footer button,.sb-footer label{display:block;width:100%;padding:7px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text2);font:inherit;font-size:10px;font-weight:500;cursor:pointer;text-align:center}.sb-footer button:hover,.sb-footer label:hover{background:var(--border);color:var(--text)}.pt{font-size:21px;font-weight:700;letter-spacing:-.5px}.ps{color:var(--text2);font-size:11px;margin-top:2px}.st{font-size:11px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:.7px;margin-bottom:12px;font-family:var(--mono)}.card{background:var(--surface);border:1px solid var(--border);border-radius:var(--rlg);padding:16px;margin-bottom:12px}.ch{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}.metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px;margin-bottom:14px}.mc{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:12px}.ml{font-size:9px;color:var(--text3);font-weight:600;text-transform:uppercase;letter-spacing:.7px;font-family:var(--mono);margin-bottom:4px}.mv{font-size:17px;font-weight:700;font-family:var(--mono);letter-spacing:-.5px;line-height:1}.mv.big{font-size:22px}.ms{font-size:9px;color:var(--text3);margin-top:3px;font-family:var(--mono)}.tag{display:inline-block;padding:2px 7px;border-radius:4px;font-size:9px;font-weight:600;font-family:var(--mono)}.tg{background:var(--gd);color:var(--green)}.tr{background:var(--rd);color:var(--red)}.ty{background:var(--yd);color:var(--yellow)}.ta{background:var(--ad);color:var(--accent)}.tp{background:var(--pd);color:var(--purple)}.tbl{width:100%;border-collapse:collapse;font-size:11px}.tbl th{text-align:left;padding:6px 7px;border-bottom:1px solid var(--border);color:var(--text3);font-weight:600;font-size:8px;text-transform:uppercase;letter-spacing:.6px;font-family:var(--mono);white-space:nowrap}.tbl td{padding:6px 7px;border-bottom:1px solid var(--border)}.tbl tr:hover td{background:var(--surface2)}.tbl .mono{font-family:var(--mono)}.tbl .g{color:var(--green)}.tbl .r{color:var(--red)}.tbl .y{color:var(--yellow)}.tbl .bold{font-weight:600}.form-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}.field{display:flex;flex-direction:column;gap:3px}.field label{font-size:8px;color:var(--text3);text-transform:uppercase;letter-spacing:.6px;font-weight:600;font-family:var(--mono)}.inp{background:var(--bg);border:1px solid var(--border2);border-radius:6px;color:var(--text);padding:8px 10px;font:inherit;font-size:12px;width:100%;outline:none}.inp:focus{border-color:var(--accent)}select.inp{cursor:pointer;appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%235a6478' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 8px center;padding-right:24px}textarea.inp{resize:vertical;min-height:80px}input[type="date"]::-webkit-calendar-picker-indicator{filter:invert(.6)}.btn{border:none;border-radius:6px;padding:8px 16px;font:inherit;font-size:12px;font-weight:600;cursor:pointer}.bp{background:var(--accent);color:#fff}.bp:hover{background:var(--accent2)}.bo{background:transparent;color:var(--text2);border:1px solid var(--border2)}.bo:hover{background:var(--surface2)}.bd{background:var(--rd);color:var(--red)}.bs{padding:4px 10px;font-size:10px}.bx{padding:3px 6px;font-size:9px}.pb{display:flex;gap:2px;background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:2px}.pbtn{padding:4px 10px;border:none;background:transparent;color:var(--text3);font:inherit;font-size:10px;font-weight:500;cursor:pointer;border-radius:4px}.pbtn.active{background:var(--ad);color:var(--accent)}.em{text-align:center;padding:18px;color:var(--text3);font-size:11px}.g2{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:12px}.g3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}@media(max-width:700px){.g2,.g3{grid-template-columns:1fr}}.uz{border:2px dashed var(--border2);border-radius:8px;padding:18px;text-align:center;cursor:pointer;color:var(--text3);display:flex;flex-direction:column;align-items:center;gap:4px;min-height:60px}.uz:hover{border-color:var(--accent)}.uz img{max-width:100%;max-height:100px;border-radius:6px}.sc{border-left:3px solid var(--border2)}.sc.profit{border-left-color:var(--green)}.sc.loss{border-left-color:var(--red)}.af{background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:8px 10px;font-family:var(--mono);font-size:12px;color:var(--accent)}.info-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:8px;margin-top:10px}.info-item{background:var(--bg);border-radius:6px;padding:10px}.info-item .val{font-family:var(--mono);font-weight:600;font-size:11px;margin-top:3px}.tip-card{padding:10px 12px;border-radius:6px;margin-bottom:6px;font-size:11px;display:flex;align-items:flex-start;gap:7px}.tip-card .dot{width:6px;height:6px;border-radius:50%;flex-shrink:0;margin-top:4px}.mode-toggle{display:flex;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:3px;margin-bottom:12px}.mode-btn{flex:1;padding:8px;border:none;border-radius:6px;cursor:pointer;font-family:var(--mono);font-size:12px;font-weight:600;transition:all .15s;text-align:center}@keyframes fadeIn{from{opacity:0;transform:translateY(5px)}to{opacity:1;transform:none}}.card,.mc{animation:fadeIn .25s ease both}`}</style>
+    <div className="shell">
+      {viewSS&&<div className="ss-modal" onClick={()=>setViewSS(null)}><img src={viewSS}/></div>}
+      {sb&&window.innerWidth<=900&&<div className="overlay" onClick={()=>setSb(false)}/>}
+      <div className="mobile-bar"><button onClick={()=>setSb(!sb)} style={{background:"none",border:"none",color:"var(--text)",fontSize:17,cursor:"pointer"}}>{"\u2630"}</button><span style={{fontWeight:700,color:"var(--accent)",fontFamily:"var(--mono)",fontSize:12}}>BT JOURNAL</span><div style={{width:24}}/></div>
+      <div className={`sidebar ${sb?"open":"closed"}`}>
+        <div className="sb-brand"><h1>BT Journal</h1><p>{user.username}</p></div>
+        {/* MODE TOGGLE */}
+        <div style={{padding:"10px 8px 4px"}}>
+          <div className="mode-toggle">
+            <button className="mode-btn" style={{background:appMode==="bt"?"var(--ad)":"transparent",color:appMode==="bt"?"var(--accent)":"var(--text3)"}} onClick={()=>{setAppMode("bt");setTab("dashboard")}}>Backtesting</button>
+            <button className="mode-btn" style={{background:appMode==="journal"?"var(--gd)":"transparent",color:appMode==="journal"?"var(--green)":"var(--text3)"}} onClick={()=>{setAppMode("journal");setTab("dashboard")}}>Journal</button>
+          </div>
+        </div>
+        <nav className="sb-nav">{nav.map(n=><button key={n.id} className={`sb-btn ${tab===n.id?"active":""}`} onClick={()=>goTab(n.id)}><span style={{fontFamily:"var(--mono)",fontSize:12,width:15,textAlign:"center"}}>{n.i}</span><span>{n.l}</span></button>)}</nav>
+        <div className="sb-footer">
+          <button onClick={exportCSV}>Exportar CSV</button>
+          <label>Importar CSV<input type="file" accept=".csv" onChange={importCSV} style={{display:"none"}}/></label>
+          {appMode==="journal"&&<label style={{background:"var(--gd)",color:"var(--green)",borderColor:"var(--green)"}}>Importar NT8<input ref={ntRef} type="file" accept=".csv" onChange={importNT8} style={{display:"none"}}/></label>}
+          <button onClick={onLogout} style={{color:"var(--red)"}}>Salir</button>
+        </div>
+      </div>
+      <div className={`main ${!sb||window.innerWidth<=900?"full":""}`}>
+      {saving&&<div style={{position:"fixed",top:0,left:0,right:0,height:3,background:appMode==="bt"?"var(--accent)":"var(--green)",zIndex:999}}/>}
+
+{/* DASHBOARD */}
+{tab==="dashboard"&&<><div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:16,flexWrap:"wrap",gap:8}}><div><h1 className="pt">{appMode==="bt"?"Backtesting":"Journal"}</h1><p className="ps">{trades.length} trades | 1R={fmt$(RV)}</p></div><Filters/></div>
+<div className="metrics"><Met label="P&L" value={`${stats.totalR>=0?"+":""}${stats.totalR}R`} sub={fmt$(stats.totalDollar)} color={stats.totalR>=0?"var(--green)":"var(--red)"} big/><Met label="Win%" value={`${stats.winRate.toFixed(2)}%`} color={stats.winRate>=50?"var(--green)":"var(--red)"} sub={`${stats.wins}W|${stats.losses}L|${stats.bes}BE`}/><Met label="PF" value={fmtPF(stats.profitFactor)} color={stats.profitFactor>=1.5?"var(--green)":"var(--yellow)"}/><Met label="Expect" value={`${stats.expectancy}R`} color={stats.expectancy>0?"var(--green)":"var(--red)"} sub={fmt$(stats.expectDollar)+"/t"}/><Met label="Sharpe" value={stats.sharpeRatio.toFixed(2)} color={stats.sharpeRatio>=1?"var(--green)":"var(--yellow)"}/><Met label="Recovery" value={stats.recoveryFactor===Infinity?"∞":stats.recoveryFactor.toFixed(2)} sub={`DD:${stats.maxEquityDD}R`} color={stats.recoveryFactor>=2?"var(--green)":"var(--yellow)"}/><Met label="Payoff" value={stats.payoffRatio===Infinity?"∞":stats.payoffRatio.toFixed(2)} color={stats.payoffRatio>=2?"var(--green)":"var(--yellow)"}/><Met label="N" value={stats.total} sub={stats.sampleValid?"OK":"<30"}/></div>
+<div className="card"><div className="st">Resumen</div><div className="info-grid"><div className="info-item"><div className="ml">Mejor dia</div><div className="val" style={{color:"var(--green)"}}>{extra.bestDay}</div></div><div className="info-item"><div className="ml">Peor dia</div><div className="val" style={{color:"var(--red)"}}>{extra.worstDay}</div></div><div className="info-item"><div className="ml">Ops/dia</div><div className="val">{extra.avgOps}</div></div><div className="info-item"><div className="ml">Racha W</div><div className="val" style={{color:"var(--green)"}}>{stats.maxWinStreak}{stats.curWinStreak>1?` (${stats.curWinStreak})`:""}</div></div><div className="info-item"><div className="ml">Racha L</div><div className="val" style={{color:"var(--red)"}}>{stats.maxLossStreak}{stats.curLossStreak>1?` (${stats.curLossStreak})`:""}</div></div><div className="info-item"><div className="ml">Dur W</div><div className="val">{stats.avgDurWin}m</div></div><div className="info-item"><div className="ml">Dur SL</div><div className="val">{stats.avgDurSL}m</div></div><div className="info-item"><div className="ml">DD%</div><div className="val" style={{color:"var(--purple)"}}>{stats.avgDDpct}%</div></div></div></div>
+<div className="g2" style={{marginBottom:10}}><div className="card"><div className="st">Equity</div><EC trades={filtered}/></div><div className="card"><div className="st">Resultados</div><div style={{display:"flex",gap:14,flexWrap:"wrap"}}>{[["WIN",stats.wins,"var(--green)"],["SL",stats.losses,"var(--red)"],["BE",stats.bes,"var(--yellow)"]].map(([l,v,c])=><div key={l} style={{textAlign:"center"}}><div style={{fontSize:22,fontWeight:700,fontFamily:"var(--mono)",color:c}}>{stats.total?Math.round(v/stats.total*10000)/100:0}%</div><div style={{fontSize:9,color:"var(--text3)"}}>{l}({v})</div></div>)}</div></div></div>
+<div className="card"><div className="st">P&L diario</div><BC data={daily.slice(0,20).reverse().map(d=>d.totalR)} labels={daily.slice(0,20).reverse().map(d=>fmtD(d.key))} unit="R"/></div>
+<div className="card"><div className="ch"><span className="st" style={{margin:0}}>Recientes</span><button className="btn bo bx" onClick={()=>setTab("trades")}>Todos</button></div><div style={{overflowX:"auto"}}><table className="tbl"><thead><tr><th>Fecha</th><th>Setup</th><th>B/S</th><th>R</th><th>Rmx</th><th>P&L</th><th>Res</th><th>Dir</th></tr></thead><tbody>{filtered.slice(0,8).map(t=>{const r=gR(t);return<tr key={t.id} style={{cursor:"pointer"}} onClick={()=>edit(t)}><td className="mono">{fmtD(t.fecha)}</td><td><ST s={t.setup}/></td><td><BT bs={t.buySell}/></td><td className="mono bold" style={{color:r>0?"var(--green)":r<0?"var(--red)":"var(--yellow)"}}>{fmtR(r)}</td><td className="mono" style={{color:"var(--purple)"}}>{pn(t.rMaximo)>0?t.rMaximo+"R":""}</td><td className="mono bold" style={{color:r>=0?"var(--green)":"var(--red)"}}>{fmt$(r*RV)}</td><td><RT res={t.resultado}/></td><td><DT2 dir={t.direccionDia}/></td></tr>})}</tbody></table></div>{!filtered.length&&<div className="em">Sin trades en {appMode==="bt"?"Backtesting":"Journal"}</div>}</div></>}
+
+{tab==="calendario"&&<><h1 className="pt" style={{marginBottom:14}}>{appMode==="bt"?"BT":"Journal"} Calendario</h1><Calendar trades={trades} month={calMonth} year={calYear} onPrev={()=>{calMonth===0?(setCalMonth(11),setCalYear(calYear-1)):setCalMonth(calMonth-1)}} onNext={()=>{calMonth===11?(setCalMonth(0),setCalYear(calYear+1)):setCalMonth(calMonth+1)}}/></>}
+
+{tab==="trades"&&<><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12,flexWrap:"wrap",gap:8}}><h1 className="pt">{appMode==="bt"?"BT":"Journal"} Trades</h1><div style={{display:"flex",gap:6,flexWrap:"wrap",alignItems:"center"}}><Filters/><button className="btn bp bs" onClick={()=>goTab("addTrade")}>+Nuevo</button></div></div><div className="card" style={{overflowX:"auto"}}><table className="tbl" style={{minWidth:1100}}><thead><tr>{["Fecha","S","Hora","Dur","Setup","Ctx","B/S","SL","R","Rmx","P&L","Res","DD%","Dir","News","",""].map(h=><th key={h}>{h}</th>)}</tr></thead><tbody>{filtered.map(t=>{const r=gR(t),dd=gDD(t);return<tr key={t.id}><td className="mono">{fmtD(t.fecha)}</td><td className="mono">S{wom(t.fecha)}</td><td className="mono" style={{fontSize:9}}>{t.horaInicio}>{t.horaFinal}</td><td className="mono">{t.duracionTrade?t.duracionTrade+"m":""}</td><td><ST s={t.setup}/></td><td style={{fontSize:9}}>{t.contexto}</td><td><BT bs={t.buySell}/></td><td className="mono">{t.puntosSlStr}</td><td className="mono bold" style={{color:r>0?"var(--green)":r<0?"var(--red)":"var(--yellow)"}}>{fmtR(r)}</td><td className="mono" style={{color:"var(--purple)"}}>{pn(t.rMaximo)>0?t.rMaximo+"R":""}</td><td className="mono bold" style={{color:r>=0?"var(--green)":"var(--red)"}}>{fmt$(r*RV)}</td><td><RT res={t.resultado}/></td><td className="mono" style={{color:"var(--purple)"}}>{dd!==null?dd+"%":""}</td><td><DT2 dir={t.direccionDia}/></td><td>{t.hayNoticia==="SI"?<span className="tag tp">{t.noticiaHora}</span>:""}</td><td>{t.screenshot?<span style={{cursor:"pointer",color:"var(--accent)"}} onClick={()=>setViewSS(t.screenshot)}>Img</span>:""}</td><td><div style={{display:"flex",gap:2}}><button className="btn bo bx" onClick={()=>edit(t)}>E</button><button className="btn bd bx" onClick={()=>del(t.id)}>X</button></div></td></tr>})}</tbody></table>{!filtered.length&&<div className="em">Sin trades</div>}</div></>}
+
+{tab==="addTrade"&&<><h1 className="pt" style={{marginBottom:12}}>{editId?"Editar":"Nuevo"} ({appMode==="bt"?"BT":"Journal"})</h1>
+<div className="card"><div className="st">General</div><div className="form-grid">{F("Fecha","fecha","date")}<div className="field"><label>Sem</label><div className="af">S{autoWeek||"-"}</div></div><TP2 label="H.In" value={form.horaInicio} onChange={setHI}/><TP2 label="H.Out" value={form.horaFinal} onChange={setHF}/><div className="field"><label>Dur</label><div className="af">{autoDur?autoDur+"m":"-"}</div></div>{F("ATR","atr","number")}</div></div>
+<div className="card"><div className="st">Trade</div><div className="form-grid">{F("Setup","setup",null,SETUPS)}{F("Ctx","contexto",null,CTXS)}{F("B/S","buySell",null,["BUY","SELL"])}{F("SL pts","puntosSlStr","number")}{F("DD pts","ddPuntos","number")}<div className="field"><label>DD%</label><div className="af" style={{color:ddPct&&ddPct>50?"var(--red)":"var(--purple)"}}>{ddPct!==null?ddPct+"%":"-"}</div></div></div></div>
+<div className="card"><div className="st">Resultado</div><div className="form-grid">{F("Result","resultado",null,RESS)}{isWin&&F("R ganados","rResultado","number")}{isWin&&F("R max mov","rMaximo","number")}{F("Brk M30","breakRangoM30",null,["NO","SI"])}{F("Dir","direccionDia",null,DIRS)}</div>{form.resultado==="SL"&&<p style={{marginTop:6,fontSize:10,color:"var(--red)",fontFamily:"var(--mono)"}}>-1R=-{fmt$(RV)}</p>}{form.resultado==="BE"&&<p style={{marginTop:6,fontSize:10,color:"var(--yellow)",fontFamily:"var(--mono)"}}>0R</p>}{isWin&&pn(form.rResultado)>0&&<p style={{marginTop:6,fontSize:10,color:"var(--green)",fontFamily:"var(--mono)"}}>+{form.rResultado}R=+{fmt$(pn(form.rResultado)*RV)}{pn(form.rMaximo)>0?` (max ${form.rMaximo}R)`:""}</p>}</div>
+<div className="card"><div className="st">Noticias</div><div className="form-grid">{F("Noticia?","hayNoticia",null,["NO","SI"])}{form.hayNoticia==="SI"&&F("Hora","noticiaHora",null,NHS)}{form.hayNoticia==="SI"&&F("Impacto","noticiaImpacto",null,NIS)}{form.hayNoticia==="SI"&&F("Tipo","noticiaTipo",null,NTS)}</div></div>
+<div className="card"><div className="st">ORB</div><div className="form-grid" style={{gridTemplateColumns:"repeat(3,1fr)"}}>{F("M5","m5","number")}{F("M15","m15","number")}{F("M30","m30","number")}</div></div>
+<div className="card"><div className="st">Img&Notas</div><div className="g2"><div><input ref={fRef} type="file" accept="image/*" onChange={handleFile} style={{display:"none"}}/><div className="uz" onClick={()=>fRef.current?.click()}>{form.screenshotPreview?<img src={form.screenshotPreview}/>:<span style={{fontSize:10}}>Subir</span>}</div></div><div className="field"><label>Notas</label><textarea className="inp" value={form.notas||""} onChange={e=>setForm(f=>({...f,notas:e.target.value}))}/></div></div></div>
+<div style={{display:"flex",gap:8}}><button className="btn bp" onClick={save} disabled={saving}>{saving?"...":editId?"Guardar":"Registrar"}</button>{editId&&<button className="btn bo" onClick={()=>{setEditId(null);setForm({...DT});setTab("trades")}}>Cancel</button>}</div></>}
+
+{tab==="estadisticas"&&<><h1 className="pt" style={{marginBottom:12}}>{appMode==="bt"?"BT":"Journal"} Stats</h1><div style={{marginBottom:10}}><Filters/></div>
+<STable title="Por dia" data={daily.slice(0,30)} cols={["Fecha","N","W","L","Win%","R","P&L","PF"]} row={d=>[fmtD(d.key),d.total,[d.wins,"g"],[d.losses,"r"],[`${d.winRate.toFixed(2)}%`,d.winRate>=50?"g":"r"],[`${d.totalR>0?"+":""}${d.totalR}R`,d.totalR>=0?"g":"r",true],[fmt$(d.totalDollar),d.totalDollar>=0?"g":"r"],fmtPF(d.profitFactor)]}/>
+<STable title="Por semana" data={weekly} cols={["Sem","N","Win%","R","PF"]} row={w2=>[w2.key,w2.total,[`${w2.winRate.toFixed(2)}%`,w2.winRate>=50?"g":"r"],[`${w2.totalR>0?"+":""}${w2.totalR}R`,w2.totalR>=0?"g":"r",true],fmtPF(w2.profitFactor)]} chart={weekly}/>
+<STable title="Por mes" data={monthly} cols={["Mes","N","Win%","R","PF"]} row={m=>[m.key,m.total,[`${m.winRate.toFixed(2)}%`,m.winRate>=50?"g":"r"],[`${m.totalR>0?"+":""}${m.totalR}R`,m.totalR>=0?"g":"r",true],fmtPF(m.profitFactor)]} chart={monthly}/>
+<STable title="Por ano" data={yearly} cols={["Yr","N","Win%","R","PF"]} row={y=>[y.key,y.total,[`${y.winRate.toFixed(2)}%`,y.winRate>=50?"g":"r"],[`${y.totalR>0?"+":""}${y.totalR}R`,y.totalR>=0?"g":"r",true],fmtPF(y.profitFactor)]} chart={yearly}/></>}
+
+{tab==="setups"&&<><h1 className="pt" style={{marginBottom:12}}>Setups</h1><div className="g2" style={{marginBottom:12}}>{SETUPS.map(su=>{const s2=setupS[su];return<div key={su} className={`card sc ${s2.totalR>0?"profit":s2.total?"loss":""}`}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}><span style={{fontSize:14,fontWeight:700,color:"var(--accent)",fontFamily:"var(--mono)"}}>{su}</span><span className="tag ta">{s2.total}</span></div><div className="g3" style={{gap:6}}>{[["Win%",`${s2.winRate.toFixed(2)}%`,s2.winRate>=50?"var(--green)":"var(--red)"],["R",`${s2.totalR>0?"+":""}${s2.totalR}R`,s2.totalR>=0?"var(--green)":"var(--red)"],["PF",fmtPF(s2.profitFactor)]].map(([l,v,c])=><div key={l}><div className="ml">{l}</div><div style={{fontSize:15,fontWeight:700,fontFamily:"var(--mono)",color:c}}>{v}</div></div>)}</div></div>})}</div></>}
+
+{tab==="avanzado"&&<><h1 className="pt" style={{marginBottom:12}}>Avanzado</h1><div style={{marginBottom:10}}><Filters/></div>
+<div className="g2" style={{marginBottom:10}}><div className="card"><div className="st">R tomados</div>{rTaken.lvl.length?<BC data={rTaken.pct} labels={rTaken.lvl} height={100} unit="%" colors={rTaken.lvl.map(()=>"var(--green)")}/>:<div className="em">Sin wins</div>}</div><div className="card"><div className="st">R maximo</div>{rMx.lvl.length?<BC data={rMx.pct} labels={rMx.lvl} height={100} unit="%" colors={rMx.lvl.map(()=>"var(--purple)")}/>:<div className="em">Sin data</div>}</div></div>
+<div className="card"><div className="st">Por hora</div>{hStats.length?<><table className="tbl"><thead><tr><th>Hora</th><th>N</th><th>Win%</th><th>R</th><th>PF</th></tr></thead><tbody>{hStats.map(h=><tr key={h.hour}><td className="mono bold">{h.hour}</td><td className="mono">{h.total}</td><td className={`mono ${h.winRate>=50?"g":"r"}`}>{h.winRate.toFixed(2)}%</td><td className={`mono bold ${h.totalR>=0?"g":"r"}`}>{h.totalR>0?"+":""}{h.totalR}R</td><td className="mono">{fmtPF(h.profitFactor)}</td></tr>)}</tbody></table><div style={{marginTop:8}}><BC data={hStats.map(h=>h.winRate)} labels={hStats.map(h=>h.hour)} height={100} unit="%" colors={hStats.map(h=>h.winRate>=50?"var(--green)":"var(--red)")}/></div></>:<div className="em">Sin data</div>}</div>
+<div className="g2"><div className="card"><div className="st">Por ATR</div>{atrS.length?<table className="tbl"><thead><tr><th>ATR</th><th>N</th><th>Win%</th><th>R</th></tr></thead><tbody>{atrS.map(a=><tr key={a.range}><td className="mono bold">{a.range}</td><td className="mono">{a.total}</td><td className={`mono ${a.winRate>=50?"g":"r"}`}>{a.winRate.toFixed(2)}%</td><td className={`mono bold ${a.totalR>=0?"g":"r"}`}>{a.totalR>0?"+":""}{a.totalR}R</td></tr>)}</tbody></table>:<div className="em">-</div>}</div><div className="card"><div className="st">Por SL</div>{slS.length?<table className="tbl"><thead><tr><th>SL</th><th>N</th><th>Win%</th><th>R</th></tr></thead><tbody>{slS.map(s2=><tr key={s2.range}><td className="mono bold">{s2.range}</td><td className="mono">{s2.total}</td><td className={`mono ${s2.winRate>=50?"g":"r"}`}>{s2.winRate.toFixed(2)}%</td><td className={`mono bold ${s2.totalR>=0?"g":"r"}`}>{s2.totalR>0?"+":""}{s2.totalR}R</td></tr>)}</tbody></table>:<div className="em">-</div>}</div></div></>}
+
+{tab==="tips"&&<><h1 className="pt" style={{marginBottom:12}}>Tips</h1>{tips.length?tips.map((t,i)=>{const c={green:{bg:"rgba(0,214,143,.08)",b:"var(--green)"},red:{bg:"rgba(255,71,87,.08)",b:"var(--red)"},yellow:{bg:"rgba(255,192,72,.08)",b:"var(--yellow)"},blue:{bg:"rgba(76,154,255,.08)",b:"var(--accent)"}}[t.type]||{bg:"var(--surface2)",b:"var(--text3)"};return<div key={i} className="tip-card" style={{background:c.bg,borderLeft:`3px solid ${c.b}`}}><div className="dot" style={{background:c.b}}/><span>{t.text}</span></div>}):<div className="em">Min 5 trades</div>}</>}
+
+      </div></div></>)
 }
 
-// ── Tips automáticos ────────────────────────────────────────
-function generateTips(trades) {
-  if (trades.length < 5) return ["Necesitas al menos 5 trades para generar tips."];
+// ROOT
+function App(){const[user,setUser]=useState(()=>{try{return JSON.parse(localStorage.getItem("bt_user"))}catch{return null}});const logout=()=>{localStorage.removeItem("bt_user");setUser(null)};if(!user)return<LoginScreen onLogin={u=>setUser({id:u.id,username:u.username})}/>;return<Journal user={user} onLogout={logout}/>}
+ReactDOM.createRoot(document.getElementById('root')).render(<React.StrictMode><App/></React.StrictMode>)
 
-  const tips = [];
-  const s = calcStats(trades);
-  const byHour = statsByHourBlock(trades);
-  const bySetup = statsBySetup(trades);
-  const capture = capturePercent(trades);
+{tab==="dashboard"&&<><div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:16,flexWrap:"wrap",gap:8}}><div><h1 className="pt">Dashboard</h1><p className="ps">{modeTrades.length} trades | 1R={fmt$(RV)}</p></div><Filters/></div>
+<div className="metrics"><Met label="P&L" value={`${stats.totalR>=0?"+":""}${stats.totalR}R`} sub={fmt$(stats.totalDollar)} color={stats.totalR>=0?"var(--green)":"var(--red)"} big/><Met label="Win%" value={`${stats.winRate.toFixed(2)}%`} color={stats.winRate>=50?"var(--green)":"var(--red)"} sub={`${stats.wins}W|${stats.losses}L|${stats.bes}BE`}/><Met label="PF" value={fmtPF(stats.profitFactor)} color={stats.profitFactor>=1.5?"var(--green)":stats.profitFactor>=1?"var(--yellow)":"var(--red)"}/><Met label="Expect" value={`${stats.expectancy}R`} color={stats.expectancy>0?"var(--green)":"var(--red)"} sub={fmt$(stats.expectDollar)+"/t"}/><Met label="Sharpe" value={stats.sharpeRatio.toFixed(2)} color={stats.sharpeRatio>=1?"var(--green)":"var(--yellow)"}/><Met label="Recovery" value={stats.recoveryFactor===Infinity?"∞":stats.recoveryFactor.toFixed(2)} color={stats.recoveryFactor>=2?"var(--green)":"var(--yellow)"} sub={`DD:${stats.maxEquityDD}R`}/><Met label="Payoff" value={stats.payoffRatio===Infinity?"∞":stats.payoffRatio.toFixed(2)} color={stats.payoffRatio>=2?"var(--green)":"var(--yellow)"}/><Met label="Trades" value={stats.total} sub={stats.sampleValid?"OK":"<30"}/></div>
+<div className="card"><div className="st">Resumen</div><div className="info-grid"><div className="info-item"><div className="ml">Mejor dia</div><div className="val" style={{color:"var(--green)"}}>{extra.bestDay}</div></div><div className="info-item"><div className="ml">Peor dia</div><div className="val" style={{color:"var(--red)"}}>{extra.worstDay}</div></div><div className="info-item"><div className="ml">Ops/dia</div><div className="val">{extra.avgOps}</div></div><div className="info-item"><div className="ml">Racha W</div><div className="val" style={{color:"var(--green)"}}>{stats.maxWinStreak}{stats.curWinStreak>1?`(${stats.curWinStreak})`:""}</div></div><div className="info-item"><div className="ml">Racha L</div><div className="val" style={{color:"var(--red)"}}>{stats.maxLossStreak}{stats.curLossStreak>1?`(${stats.curLossStreak})`:""}</div></div><div className="info-item"><div className="ml">Dur W/SL</div><div className="val">{stats.avgDurWin}m/{stats.avgDurSL}m</div></div></div></div>
+<div className="g2" style={{marginBottom:10}}><div className="card"><div className="st">Equity</div><EC trades={filtered}/></div><div className="card"><div className="st">Resultados</div><div style={{display:"flex",gap:14,flexWrap:"wrap"}}>{[["W",stats.wins,"var(--green)"],["SL",stats.losses,"var(--red)"],["BE",stats.bes,"var(--yellow)"]].map(([l,v,c])=><div key={l} style={{textAlign:"center"}}><div style={{fontSize:22,fontWeight:700,fontFamily:"var(--mono)",color:c}}>{stats.total?Math.round(v/stats.total*10000)/100:0}%</div><div style={{fontSize:9,color:"var(--text3)"}}>{l}({v})</div></div>)}</div></div></div>
+<div className="card"><div className="st">P&L diario</div><BC data={daily.slice(0,20).reverse().map(d=>d.totalR)} labels={daily.slice(0,20).reverse().map(d=>fmtD(d.key))} unit="R"/></div>
+<div className="card"><div className="ch"><span className="st" style={{margin:0}}>Recientes</span><button className="btn bo bx" onClick={()=>setTab("trades")}>Todos</button></div><div style={{overflowX:"auto"}}><table className="tbl"><thead><tr><th>Fecha</th><th>Setup</th><th>B/S</th><th>R</th><th>Rmx</th><th>P&L</th><th>Res</th><th>Dir</th></tr></thead><tbody>{filtered.slice(0,8).map(t=>{const r=gR(t);return<tr key={t.id} style={{cursor:"pointer"}} onClick={()=>edit(t)}><td className="mono">{fmtD(t.fecha)}</td><td><ST s={t.setup}/></td><td><BT2 bs={t.buySell}/></td><td className="mono bold" style={{color:r>0?"var(--green)":r<0?"var(--red)":"var(--yellow)"}}>{fmtR(r)}</td><td className="mono" style={{color:"var(--purple)"}}>{pn(t.rMaximo)>0?t.rMaximo+"R":""}</td><td className="mono bold" style={{color:r>=0?"var(--green)":"var(--red)"}}>{fmt$(r*RV)}</td><td><RT res={t.resultado}/></td><td><DT2 dir={t.direccionDia}/></td></tr>})}</tbody></table></div>{!filtered.length&&<div className="em">Sin trades</div>}</div></>}
 
-  // Mejor / peor hora
-  const hourEntries = Object.entries(byHour).filter(([, st]) => st.total >= 3);
-  if (hourEntries.length > 0) {
-    const best = hourEntries.reduce((a, b) => (a[1].winRate > b[1].winRate ? a : b));
-    const worst = hourEntries.reduce((a, b) => (a[1].winRate < b[1].winRate ? a : b));
-    tips.push(`🎯 Mejor hora: ${best[0]} (WR ${best[1].winRate.toFixed(1)}%, ${best[1].total} trades)`);
-    tips.push(`⚠️ Peor hora: ${worst[0]} (WR ${worst[1].winRate.toFixed(1)}%, ${worst[1].total} trades)`);
-  }
+{tab==="calendario"&&<><h1 className="pt" style={{marginBottom:14}}>Calendario</h1><Calendar trades={modeTrades} month={calM} year={calY} onPrev={()=>{calM===0?(setCalM(11),setCalY(calY-1)):setCalM(calM-1)}} onNext={()=>{calM===11?(setCalM(0),setCalY(calY+1)):setCalM(calM+1)}}/></>}
 
-  // Mejor setup
-  const setupEntries = Object.entries(bySetup).filter(([, st]) => st.total >= 3);
-  if (setupEntries.length > 0) {
-    const bestSetup = setupEntries.reduce((a, b) =>
-      a[1].expectancyR > b[1].expectancyR ? a : b
-    );
-    tips.push(
-      `📊 Mejor setup: ${bestSetup[0]} (Exp ${bestSetup[1].expectancyR.toFixed(2)}R, WR ${bestSetup[1].winRate.toFixed(1)}%)`
-    );
-  }
+{tab==="trades"&&<><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12,flexWrap:"wrap",gap:8}}><h1 className="pt">Trades</h1><div style={{display:"flex",gap:6,flexWrap:"wrap",alignItems:"center"}}><Filters/><button className="btn bp bs" onClick={()=>goTab("addTrade")}>+Nuevo</button></div></div><div className="card" style={{overflowX:"auto"}}><table className="tbl" style={{minWidth:1100}}><thead><tr>{["Fecha","S","Hora","Dur","Setup","B/S","SL","R","Rmx","P&L","Res","DD%","Dir","",""].map(h=><th key={h}>{h}</th>)}</tr></thead><tbody>{filtered.map(t=>{const r=gR(t),dd=gDD(t);return<tr key={t.id}><td className="mono">{fmtD(t.fecha)}</td><td className="mono">S{wom(t.fecha)}</td><td className="mono" style={{fontSize:10}}>{t.horaInicio}>{t.horaFinal}</td><td className="mono">{t.duracionTrade?t.duracionTrade+"m":""}</td><td><ST s={t.setup}/></td><td><BT2 bs={t.buySell}/></td><td className="mono">{t.puntosSlStr}</td><td className="mono bold" style={{color:r>0?"var(--green)":r<0?"var(--red)":"var(--yellow)"}}>{fmtR(r)}</td><td className="mono" style={{color:"var(--purple)"}}>{pn(t.rMaximo)>0?t.rMaximo+"R":""}</td><td className="mono bold" style={{color:r>=0?"var(--green)":"var(--red)"}}>{fmt$(r*RV)}</td><td><RT res={t.resultado}/></td><td className="mono" style={{color:"var(--purple)"}}>{dd!==null?dd+"%":""}</td><td><DT2 dir={t.direccionDia}/></td><td>{t.notas?<span title={t.notas} style={{color:"var(--text3)",cursor:"help"}}>📝</span>:""}</td><td><div style={{display:"flex",gap:2}}><button className="btn bo bx" onClick={()=>edit(t)}>E</button><button className="btn bd bx" onClick={()=>del(t.id)}>X</button></div></td></tr>})}</tbody></table>{!filtered.length&&<div className="em">Sin trades</div>}</div></>}
 
-  // Capture %
-  tips.push(`📈 Capturas promedio: ${capture.toFixed(1)}% del movimiento máximo`);
+{tab==="addTrade"&&<><h1 className="pt" style={{marginBottom:12}}>{editId?"Editar":"Nuevo trade"}</h1>
+<div className="card"><div className="st">General</div><div className="form-grid">{F("Fecha","fecha","date")}<div className="field"><label>Semana</label><div className="af">S{autoWeek||"-"}</div></div><TP label="H.Inicio" value={form.horaInicio} onChange={setHI}/><TP label="H.Final" value={form.horaFinal} onChange={setHF}/><div className="field"><label>Duracion</label><div className="af">{autoDur?autoDur+"m":"-"}</div></div>{F("ATR","atr","number")}</div></div>
+<div className="card"><div className="st">Trade</div><div className="form-grid">{F("Setup","setup",null,SETUPS)}{F("Contexto","contexto",null,CTXS)}{F("B/S","buySell",null,["BUY","SELL"])}{F("SL pts","puntosSlStr","number")}{F("DD pts","ddPuntos","number")}<div className="field"><label>DD%</label><div className="af" style={{color:ddPct&&ddPct>50?"var(--red)":"var(--purple)"}}>{ddPct!==null?ddPct+"%":"-"}</div></div></div></div>
+<div className="card"><div className="st">Resultado</div><div className="form-grid">{F("Result","resultado",null,RESS)}{isWin&&F("R ganados","rResultado","number")}{isWin&&F("R max","rMaximo","number")}{F("Brk M30","breakRangoM30",null,["NO","SI"])}{F("Dir","direccionDia",null,DIRS)}</div>{form.resultado==="SL"&&<p style={{marginTop:8,fontSize:11,color:"var(--red)",fontFamily:"var(--mono)"}}>-1R=-{fmt$(RV)}</p>}{form.resultado==="BE"&&<p style={{marginTop:8,fontSize:11,color:"var(--yellow)",fontFamily:"var(--mono)"}}>0R=$0</p>}{isWin&&pn(form.rResultado)>0&&<p style={{marginTop:8,fontSize:11,color:"var(--green)",fontFamily:"var(--mono)"}}>+{form.rResultado}R=+{fmt$(pn(form.rResultado)*RV)}{pn(form.rMaximo)>0?` (max ${form.rMaximo}R)`:""}</p>}</div>
+<div className="card"><div className="st">Noticias</div><div className="form-grid">{F("Noticia?","hayNoticia",null,["NO","SI"])}{form.hayNoticia==="SI"&&F("Hora","noticiaHora",null,NHS)}{form.hayNoticia==="SI"&&F("Impacto","noticiaImpacto",null,NIS)}{form.hayNoticia==="SI"&&F("Tipo","noticiaTipo",null,NTS)}</div></div>
+<div className="card"><div className="st">ORB</div><div className="form-grid" style={{gridTemplateColumns:"repeat(3,1fr)"}}>{F("M5","m5","number")}{F("M15","m15","number")}{F("M30","m30","number")}</div></div>
+<div className="card"><div className="st">Img & Notas</div><div className="g2"><div><input ref={fRef} type="file" accept="image/*" onChange={handleFile} style={{display:"none"}}/><div className="uz" onClick={()=>fRef.current?.click()}>{form.screenshotPreview?<img src={form.screenshotPreview}/>:<span style={{fontSize:10}}>Subir</span>}</div></div><div className="field"><label>Notas</label><textarea className="inp" value={form.notas||""} onChange={e=>setForm(f=>({...f,notas:e.target.value}))}/></div></div></div>
+<div style={{display:"flex",gap:8}}><button className="btn bp" onClick={save} disabled={saving}>{saving?"...":editId?"Guardar":"Registrar"}</button>{editId&&<button className="btn bo" onClick={()=>{setEditId(null);setForm({...DT});setTab("trades")}}>Cancelar</button>}</div></>}
 
-  // Rachas
-  tips.push(`🔥 Racha WIN máx: ${s.maxWinStreak} | Racha SL máx: ${s.maxLossStreak}`);
+{tab==="estadisticas"&&<><h1 className="pt" style={{marginBottom:12}}>Stats</h1><div style={{marginBottom:10}}><Filters/></div>
+<STable title="Por dia" data={daily.slice(0,30)} cols={["Fecha","N","W","L","Win%","R","P&L","PF"]} row={d=>[fmtD(d.key),d.total,[d.wins,"g"],[d.losses,"r"],[`${d.winRate.toFixed(2)}%`,d.winRate>=50?"g":"r"],[`${d.totalR>0?"+":""}${d.totalR}R`,d.totalR>=0?"g":"r",true],[fmt$(d.totalDollar),d.totalDollar>=0?"g":"r"],fmtPF(d.profitFactor)]}/>
+<STable title="Por semana" data={weekly} cols={["Sem","N","Win%","R","PF"]} row={w=>[w.key,w.total,[`${w.winRate.toFixed(2)}%`,w.winRate>=50?"g":"r"],[`${w.totalR>0?"+":""}${w.totalR}R`,w.totalR>=0?"g":"r",true],fmtPF(w.profitFactor)]} chart={weekly}/>
+<STable title="Por mes" data={monthly} cols={["Mes","N","Win%","R","PF"]} row={m=>[m.key,m.total,[`${m.winRate.toFixed(2)}%`,m.winRate>=50?"g":"r"],[`${m.totalR>0?"+":""}${m.totalR}R`,m.totalR>=0?"g":"r",true],fmtPF(m.profitFactor)]} chart={monthly}/>
+<STable title="Por ano" data={yearly} cols={["Yr","N","Win%","R","PF"]} row={y=>[y.key,y.total,[`${y.winRate.toFixed(2)}%`,y.winRate>=50?"g":"r"],[`${y.totalR>0?"+":""}${y.totalR}R`,y.totalR>=0?"g":"r",true],fmtPF(y.profitFactor)]} chart={yearly}/></>}
 
-  // Sharpe
-  if (s.sharpe > 0) tips.push(`📉 Sharpe Ratio: ${s.sharpe.toFixed(2)}`);
+{tab==="setups"&&<><h1 className="pt" style={{marginBottom:12}}>Setups</h1><div className="g2" style={{marginBottom:12}}>{SETUPS.map(su=>{const s2=setupS[su];return<div key={su} className={`card sc ${s2.totalR>0?"profit":s2.total?"loss":""}`}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}><span style={{fontSize:14,fontWeight:700,color:"var(--accent)",fontFamily:"var(--mono)"}}>{su}</span><span className="tag ta">{s2.total}</span></div><div className="g3" style={{gap:6}}>{[["W%",`${s2.winRate.toFixed(2)}%`,s2.winRate>=50?"var(--green)":"var(--red)"],["R",`${s2.totalR>0?"+":""}${s2.totalR}R`,s2.totalR>=0?"var(--green)":"var(--red)"],["PF",fmtPF(s2.profitFactor)]].map(([l,v,c])=><div key={l}><div className="ml">{l}</div><div style={{fontSize:15,fontWeight:700,fontFamily:"var(--mono)",color:c}}>{v}</div></div>)}</div></div>})}</div></>}
 
-  // Recovery
-  if (s.recoveryFactor !== Infinity && s.recoveryFactor > 0)
-    tips.push(`🔄 Recovery Factor: ${s.recoveryFactor.toFixed(2)}`);
+{tab==="avanzado"&&<><h1 className="pt" style={{marginBottom:12}}>Avanzado</h1><div style={{marginBottom:10}}><Filters/></div>
+<div className="g2" style={{marginBottom:10}}><div className="card"><div className="st">R tomados</div>{rTaken.lvl.length?<><BC data={rTaken.pct} labels={rTaken.lvl} height={100} unit="%" colors={rTaken.lvl.map(()=>"var(--green)")}/><table className="tbl" style={{marginTop:8}}><thead><tr><th>R</th><th>#</th><th>%</th></tr></thead><tbody>{rTaken.lvl.map((l,i)=><tr key={l}><td className="mono bold g">{l}</td><td className="mono">{rTaken.cnt[i]}</td><td className="mono">{rTaken.pct[i]}%</td></tr>)}</tbody></table></>:<div className="em">Sin wins</div>}</div>
+<div className="card"><div className="st">R maximo mov</div>{rMx.lvl.length?<><BC data={rMx.pct} labels={rMx.lvl} height={100} unit="%" colors={rMx.lvl.map(()=>"var(--purple)")}/><table className="tbl" style={{marginTop:8}}><thead><tr><th>Rmx</th><th>#</th><th>%</th></tr></thead><tbody>{rMx.lvl.map((l,i)=><tr key={l}><td className="mono bold" style={{color:"var(--purple)"}}>{l}</td><td className="mono">{rMx.cnt[i]}</td><td className="mono">{rMx.pct[i]}%</td></tr>)}</tbody></table></>:<div className="em">Sin Rmax</div>}</div></div>
+<div className="card"><div className="st">Por hora</div>{hStats.length?<><div style={{overflowX:"auto"}}><table className="tbl"><thead><tr><th>Hora</th><th>N</th><th>W%</th><th>R</th><th>PF</th></tr></thead><tbody>{hStats.map(h=><tr key={h.hour}><td className="mono bold">{h.hour}</td><td className="mono">{h.total}</td><td className={`mono ${h.winRate>=50?"g":"r"}`}>{h.winRate.toFixed(2)}%</td><td className={`mono bold ${h.totalR>=0?"g":"r"}`}>{h.totalR>0?"+":""}{h.totalR}R</td><td className="mono">{fmtPF(h.profitFactor)}</td></tr>)}</tbody></table></div><BC data={hStats.map(h=>h.winRate)} labels={hStats.map(h=>h.hour)} height={100} unit="%" colors={hStats.map(h=>h.winRate>=50?"var(--green)":"var(--red)")}/>{(()=>{const f2=hStats.filter(h=>h.total>=2);if(!f2.length)return null;const best=f2.reduce((a,x)=>x.totalR>a.totalR?x:a,f2[0]);const worst=f2.reduce((a,x)=>x.totalR<a.totalR?x:a,f2[0]);return<div className="info-grid"><div className="info-item"><div className="ml">Mejor</div><div className="val" style={{color:"var(--green)"}}>{best.hour} {best.totalR>0?"+":""}{best.totalR}R</div></div><div className="info-item"><div className="ml">Peor</div><div className="val" style={{color:"var(--red)"}}>{worst.hour} {worst.totalR>0?"+":""}{worst.totalR}R</div></div></div>})()}</>:<div className="em">Sin datos</div>}</div>
+<div className="g2"><div className="card"><div className="st">Por ATR</div>{atrS.length?<table className="tbl"><thead><tr><th>ATR</th><th>N</th><th>W%</th><th>R</th></tr></thead><tbody>{atrS.map(a=><tr key={a.range}><td className="mono bold">{a.range}</td><td className="mono">{a.total}</td><td className={`mono ${a.winRate>=50?"g":"r"}`}>{a.winRate.toFixed(2)}%</td><td className={`mono bold ${a.totalR>=0?"g":"r"}`}>{a.totalR>0?"+":""}{a.totalR}R</td></tr>)}</tbody></table>:<div className="em">Sin ATR</div>}</div>
+<div className="card"><div className="st">Por SL pts</div>{slS.length?<table className="tbl"><thead><tr><th>SL</th><th>N</th><th>W%</th><th>R</th></tr></thead><tbody>{slS.map(s2=><tr key={s2.range}><td className="mono bold">{s2.range}</td><td className="mono">{s2.total}</td><td className={`mono ${s2.winRate>=50?"g":"r"}`}>{s2.winRate.toFixed(2)}%</td><td className={`mono bold ${s2.totalR>=0?"g":"r"}`}>{s2.totalR>0?"+":""}{s2.totalR}R</td></tr>)}</tbody></table>:<div className="em">Sin datos</div>}</div></div></>}
 
-  // Payoff
-  if (s.payoff > 0) tips.push(`💰 Payoff Ratio: ${s.payoff.toFixed(2)}`);
+{tab==="tips"&&<><h1 className="pt" style={{marginBottom:12}}>Tips</h1><p className="ps" style={{marginBottom:14}}>{filtered.length} trades</p>
+{tipsList.length?tipsList.map((t,i)=>{const c={green:{bg:"rgba(0,214,143,.08)",b:"var(--green)"},red:{bg:"rgba(255,71,87,.08)",b:"var(--red)"},yellow:{bg:"rgba(255,192,72,.08)",b:"var(--yellow)"},blue:{bg:"rgba(76,154,255,.08)",b:"var(--accent)"}}[t.type]||{bg:"var(--surface2)",b:"var(--text3)"};return<div key={i} className="tip-card" style={{background:c.bg,borderLeft:`3px solid ${c.b}`}}><div className="dot" style={{background:c.b}}/><span>{t.text}</span></div>}):<div className="em">Min 5 trades</div>}</>}
 
-  // Sample size
-  if (s.total < 30) tips.push(`⚡ Sample size: ${s.total} — necesitas al menos 30 trades para resultados confiables`);
-
-  // ATR óptimo
-  const byATR = statsByATR(trades);
-  const atrEntries = Object.entries(byATR).filter(([, st]) => st.total >= 3);
-  if (atrEntries.length > 0) {
-    const bestATR = atrEntries.reduce((a, b) => (a[1].expectancyR > b[1].expectancyR ? a : b));
-    tips.push(`📏 ATR óptimo: ${bestATR[0]} (Exp ${bestATR[1].expectancyR.toFixed(2)}R)`);
-  }
-
-  // SL óptimo
-  const bySL = statsBySLPts(trades);
-  const slEntries = Object.entries(bySL).filter(([, st]) => st.total >= 3);
-  if (slEntries.length > 0) {
-    const bestSL = slEntries.reduce((a, b) => (a[1].expectancyR > b[1].expectancyR ? a : b));
-    tips.push(`🎯 SL óptimo: ${bestSL[0]} pts (Exp ${bestSL[1].expectancyR.toFixed(2)}R)`);
-  }
-
-  return tips;
+      </div></div></>)
 }
 
-// ── Parser CSV NinjaTrader 8 ────────────────────────────────
-//
-// El CSV tiene columnas:
-// Instrument, Action, Quantity, Price, Time, ID, E/X, Position, Order ID, Name, Commission, Rate, Account, Connection
-//
-// E/X = "Entry" o "Exit"
-// Hay que agrupar por trade: un Entry seguido de uno o más Exits hasta que Position = "-" o "0" o cambia de dirección
-// Parciales se juntan.
-
-function parseNT8CSV(csvText) {
-  const lines = csvText.trim().split("\n");
-  if (lines.length < 2) return [];
-
-  // Parse header
-  const header = lines[0].split(",").map((h) => h.trim());
-  const rows = [];
-  for (let i = 1; i < lines.length; i++) {
-    const vals = lines[i].split(",").map((v) => v.trim());
-    if (vals.length < header.length - 1) continue; // skip empty lines
-    const row = {};
-    header.forEach((h, idx) => {
-      row[h] = vals[idx] || "";
-    });
-    rows.push(row);
-  }
-
-  if (rows.length === 0) return [];
-
-  // Group into trades: each Entry starts a new trade, collect Exits until position closes
-  const trades = [];
-  let currentTrade = null;
-
-  for (const row of rows) {
-    const ex = (row["E/X"] || "").trim();
-    const action = (row["Action"] || "").trim(); // Buy or Sell
-    const qty = parseInt(row["Quantity"]) || 0;
-    const price = parseFloat(row["Price"]) || 0;
-    const time = (row["Time"] || "").trim();
-    const account = (row["Account"] || "").trim();
-    const position = (row["Position"] || "").trim();
-
-    if (ex === "Entry") {
-      // Close previous trade if still open
-      if (currentTrade && currentTrade.exits.length > 0) {
-        trades.push(currentTrade);
-      }
-      currentTrade = {
-        action,        // Buy or Sell (direction of entry)
-        entryQty: qty,
-        entryPrice: price,
-        entryTime: time,
-        account,
-        exits: [],
-      };
-    } else if (ex === "Exit" && currentTrade) {
-      currentTrade.exits.push({ action, qty, price, time });
-      // If position is "-" or "0", trade is fully closed
-      const posNum = parseInt(position);
-      if (position === "-" || position === "" || posNum === 0 || isNaN(posNum)) {
-        trades.push(currentTrade);
-        currentTrade = null;
-      }
-    }
-  }
-  // Push last trade if still open
-  if (currentTrade && currentTrade.exits.length > 0) {
-    trades.push(currentTrade);
-  }
-
-  // Convert grouped trades to our trade format
-  return trades.map((t) => {
-    const entryDir = t.action; // "Buy" = long, "Sell" = short
-    const isLong = entryDir === "Buy";
-
-    // Calculate P&L in points per contract, then total
-    let totalPnLPoints = 0;
-    let lastExitTime = t.entryTime;
-
-    for (const exit of t.exits) {
-      const diff = isLong
-        ? exit.price - t.entryPrice
-        : t.entryPrice - exit.price;
-      totalPnLPoints += diff * exit.qty;
-      lastExitTime = exit.time;
-    }
-
-    // MNQ = $0.50 per tick (0.25 point), so $2 per point per contract
-    // But totalPnLPoints already has qty factored in as points * qty
-    // Actually: PnL per contract = diff in points * $2/point for MNQ
-    // totalPnLPoints is already (priceExit - priceEntry) * qty summed
-    // For MNQ: 1 point = $2, but we've multiplied by qty already
-    // So total $ = totalPnLPoints * $2 for MNQ
-    // We store R = totalPnL$ / R_VALUE
-
-    // MNQ point value = $2 per point per contract
-    // NQ point value = $20 per point per contract
-    const pointValue = 2; // MNQ — adjust if needed
-    const totalPnL$ = totalPnLPoints * pointValue;
-    const rResult = totalPnL$ / R_VALUE;
-
-    // Parse dates
-    const entryDate = parseNT8DateTime(t.entryTime);
-    const exitDate  = parseNT8DateTime(lastExitTime);
-
-    // Determine resultado
-    let resultado = "WIN";
-    if (rResult < -0.5) resultado = "SL";
-    else if (Math.abs(rResult) <= 0.1) resultado = "BE";
-
-    // Extract parent account: "BX-M75953071852!Bulenox!Bulenox" -> parent = "Bulenox"
-    const accountParts = t.account.split("!");
-    const parentAccount = accountParts.length > 1 ? accountParts[1] : t.account;
-
-    return {
-      fecha:       entryDate.date,
-      horaInicio:  entryDate.time,
-      horaFinal:   exitDate.time,
-      duracionTrade: calcDuration(entryDate.time, exitDate.time),
-      buySell:     isLong ? "BUY" : "SELL",
-      resultado,
-      rResultado:  resultado === "WIN" ? Math.abs(rResult).toFixed(2) : resultado === "SL" ? "" : "",
-      rMaximo:     "", // No disponible en CSV
-      puntosSl:    "", // No disponible en CSV
-      atr:         "",
-      setup:       "",
-      contexto:    "",
-      breakRangoM30: "",
-      direccionDia:  "",
-      ddPuntos:      "",
-      hayNoticia:    "NO",
-      noticiaHora:   "",
-      noticiaImpacto: "",
-      noticiaTipo:   "",
-      m5:  "",
-      m15: "",
-      m30: "",
-      screenshot: "",
-      notas: `Importado NT8 | P&L: $${totalPnL$.toFixed(2)} | ${t.entryQty} contratos`,
-      mode:    MODES.JOURNAL,
-      account: t.account,
-      parentAccount,
-      _pnlDollars: totalPnL$, // internal, not saved
-      _rCalc: rResult,         // internal, for display
-    };
-  });
+function App(){
+  const[user,setUser]=useState(()=>{try{return JSON.parse(localStorage.getItem("bt_user"))}catch{return null}})
+  if(!user)return<LoginScreen onLogin={u=>setUser({id:u.id,username:u.username})}/>
+  return<Journal user={user} onLogout={()=>{localStorage.removeItem("bt_user");setUser(null)}}/>
 }
-
-function parseNT8DateTime(str) {
-  // "4/2/2026 9:36:35 AM"  ->  { date: "2026-04-02", time: "09:36" }
-  if (!str) return { date: "", time: "" };
-  try {
-    const [datePart, timePart, ampm] = str.split(" ");
-    const [month, day, year] = datePart.split("/").map(Number);
-    let [hour, min] = timePart.split(":").map(Number);
-
-    if (ampm && ampm.toUpperCase() === "PM" && hour < 12) hour += 12;
-    if (ampm && ampm.toUpperCase() === "AM" && hour === 12) hour = 0;
-
-    return {
-      date: isoFromParts(day, month, year),
-      time: `${String(hour).padStart(2, "0")}:${String(min).padStart(2, "0")}`,
-    };
-  } catch {
-    return { date: "", time: "" };
-  }
-}
-
-// ── CRUD Supabase ───────────────────────────────────────────
-
-async function fetchTrades(userId, mode) {
-  const { data, error } = await supabase
-    .from("trades")
-    .select("*")
-    .eq("user_id", userId)
-    .eq("mode", mode)
-    .order("fecha", { ascending: false })
-    .order("hora_inicio", { ascending: false });
-
-  if (error) { console.error("fetchTrades:", error); return []; }
-  return (data || []).map(dbToTrade);
-}
-
-async function insertTrade(trade, userId, mode) {
-  const row = tradeToDb({ ...trade, user_id: userId, mode });
-  delete row.id;
-  delete row._pnlDollars;
-  delete row._rCalc;
-  const { data, error } = await supabase.from("trades").insert([row]).select();
-  if (error) { console.error("insertTrade:", error); return null; }
-  return data?.[0] ? dbToTrade(data[0]) : null;
-}
-
-async function updateTrade(id, trade) {
-  const row = tradeToDb(trade);
-  delete row.id;
-  delete row.user_id;
-  delete row.mode;
-  delete row._pnlDollars;
-  delete row._rCalc;
-  const { data, error } = await supabase.from("trades").update(row).eq("id", id).select();
-  if (error) { console.error("updateTrade:", error); return null; }
-  return data?.[0] ? dbToTrade(data[0]) : null;
-}
-
-async function deleteTrade(id) {
-  const { error } = await supabase.from("trades").delete().eq("id", id);
-  if (error) console.error("deleteTrade:", error);
-  return !error;
-}
-
-async function insertMultipleTrades(trades, userId, mode) {
-  const rows = trades.map((t) => {
-    const row = tradeToDb({ ...t, user_id: userId, mode });
-    delete row.id;
-    delete row._pnlDollars;
-    delete row._rCalc;
-    return row;
-  });
-  const { data, error } = await supabase.from("trades").insert(rows).select();
-  if (error) { console.error("insertMultiple:", error); return []; }
-  return (data || []).map(dbToTrade);
-}
-
-// ── Auth helpers ────────────────────────────────────────────
-
-async function loginUser(username, password) {
-  const { data, error } = await supabase
-    .from("users")
-    .select("*")
-    .eq("username", username)
-    .eq("password", password)
-    .single();
-  if (error || !data) return null;
-  return { id: data.id, username: data.username };
-}
-
-async function registerUser(username, password) {
-  const { data, error } = await supabase
-    .from("users")
-    .insert([{ username, password }])
-    .select()
-    .single();
-  if (error) return { error: error.message };
-  return { user: { id: data.id, username: data.username } };
-}
-
-// ── Colores y estilos base ──────────────────────────────────
-const COLORS = {
-  bg:        "#0f0f13",
-  card:      "#1a1a24",
-  cardHover: "#22222e",
-  border:    "#2a2a3a",
-  text:      "#e4e4e7",
-  textDim:   "#71717a",
-  accent:    "#6366f1", // indigo
-  accentBT:  "#6366f1",
-  accentJournal: "#f59e0b", // amber for journal mode
-  green:     "#22c55e",
-  red:       "#ef4444",
-  yellow:    "#facc15",
-  white:     "#ffffff",
-};
-
-/* ============================================================
-   FIN PARTE 1 — Constantes, Helpers, Stats, Parser NT8, CRUD
-   La Parte 2 contendrá los componentes de UI (Login, Sidebar,
-   Dashboard, Calendario, etc.)
-   ============================================================ */
+ReactDOM.createRoot(document.getElementById('root')).render(<React.StrictMode><App/></React.StrictMode>)
