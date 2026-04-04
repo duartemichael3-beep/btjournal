@@ -1026,7 +1026,7 @@ function MainApp({ user, onLogout }) {
   const hStats = useMemo(() => hourAnalysis(filtered), [filtered])
   const atrStats = useMemo(() => atrAnalysis(filtered), [filtered])
   const slStats = useMemo(() => slAnalysis(filtered), [filtered])
-  const tipsData = useMemo(() => genTips(filtered), [filtered])
+  const tipsData = useMemo(() => suggestions(filtered), [filtered])
 
   const isSinOpForm = isSO(form)
   const isWin = form.resultado === "WIN"
