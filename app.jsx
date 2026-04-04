@@ -286,6 +286,20 @@ function atrAnalysis(trades) {
     .filter(x => x.total > 0)
 }
 
+function suggestions(trades){
+  if(trades.length<5)return[]
+  const t=[],s=cS(trades)
+  if(s.winRate>=50)t.push({type:"green",text:`Win rate: ${s.winRate.toFixed(2)}%`})
+  else t.push({type:"red",text:`Win rate bajo: ${s.winRate.toFixed(2)}%`})
+  if(s.profitFactor>=1.5)t.push({type:"green",text:`PF: ${fmtPF(s.profitFactor)}`})
+  if(s.maxLossStreak>=3)t.push({type:"red",text:`Racha loss max: ${s.maxLossStreak}`})
+  if(s.recoveryFactor!==Infinity&&s.recoveryFactor>0)t.push({type:s.recoveryFactor>=2?"green":"yellow",text:`Recovery: ${s.recoveryFactor.toFixed(2)}`})
+  if(s.sharpeRatio!==0)t.push({type:s.sharpeRatio>=1?"green":"yellow",text:`Sharpe: ${s.sharpeRatio.toFixed(2)}`})
+  if(s.avgDurWin)t.push({type:"blue",text:`Duracion WIN=${s.avgDurWin}m SL=${s.avgDurSL}m`})
+  if(!s.sampleValid)t.push({type:"yellow",text:`${s.total}/30 trades para stats confiables`})
+  return t
+}
+
 function slAnalysis(trades) {
   return [[0, 15, "1-15"], [15, 20, "15-20"], [20, 25, "20-25"], [25, 30, "25-30"], [30, 40, "30-40"], [40, 999, "40+"]]
     .map(([lo, hi, label]) => ({ range: label, ...cS(rT(trades).filter(t => { const p = pn(t.puntosSlStr); return p > lo && p <= hi })) }))
