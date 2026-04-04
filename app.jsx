@@ -1,206 +1,744 @@
+/* ============================================================
+   BT JOURNAL — app.jsx  (Parte 1 / 4)
+   Constantes · Helpers · Stats · Parser NT8
+   ============================================================ */
+import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
+import { createClient } from "@supabase/supabase-js";
 
-import React from 'react'
-import ReactDOM from 'react-dom/client'
-import{useState,useMemo,useEffect,useRef,useCallback}from"react"
+// ── Supabase ────────────────────────────────────────────────
+const SUPABASE_URL = "https://kkcsykncinisnknymonz.supabase.co";
+const SUPABASE_ANON =
+  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtrY3N5a25jaW5pc25rbnltb256Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzUyNjYxMzIsImV4cCI6MjA5MDg0MjEzMn0.m8M_nIg6h87ocMedXSOSzOr0Xv0iIwjMWuODTnbHmSI";
+const supabase = createClient(SUPABASE_URL, SUPABASE_ANON);
 
-const SUPA_URL="https://kkcsykncinisnknymonz.supabase.co"
-const SUPA_KEY="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtrY3N5a25jaW5pc25rbnltb256Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzUyNjYxMzIsImV4cCI6MjA5MDg0MjEzMn0.m8M_nIg6h87ocMedXSOSzOr0Xv0iIwjMWuODTnbHmSI"
-const supa=(path,method="GET",body)=>fetch(`${SUPA_URL}/rest/v1/${path}`,{method,headers:{"apikey":SUPA_KEY,"Authorization":`Bearer ${SUPA_KEY}`,"Content-Type":"application/json","Prefer":method==="POST"?"return=representation":method==="PATCH"?"return=representation":""},body:body?JSON.stringify(body):undefined}).then(r=>r.json())
+// ── Constantes de dominio ───────────────────────────────────
+const R_VALUE = 300; // 1R = $300
 
-const SETUPS=["M1","M2","M3","J1","J2"],CTXS=["APERTURA","ROMPIMIENTO","GIRO"],DIRS=["RANGO","ALCISTA","BAJISTA"],RESS=["SL","BE","WIN"]
-const NHS=["","08:30","09:45","10:00","10:30"],NIS=["","ALTO","MEDIO","BAJO"],NTS=["","NFP","CPI","PPI","FOMC","JOBLESS CLAIMS","GDP","RETAIL SALES","ISM","PCE","OTRA"]
-const RV=300
-const DT={fecha:"",horaInicio:"09:30",horaFinal:"10:00",atr:"",setup:"M1",contexto:"APERTURA",buySell:"BUY",puntosSlStr:"",rResultado:"",rMaximo:"",resultado:"SL",breakRangoM30:"NO",direccionDia:"RANGO",m5:"",m15:"",m30:"",ddPuntos:"",hayNoticia:"NO",noticiaHora:"",noticiaImpacto:"",noticiaTipo:"",screenshot:null,screenshotPreview:null,notas:""}
-const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,7)
-const pn=v=>{const n=parseFloat(v);return isNaN(n)?0:n}
-const fmt$=v=>(v<0?"-":"")+"$"+Math.abs(v).toLocaleString()
-const fmtR=v=>(v>0?"+":"")+v+"R"
-const fmtPF=v=>v===Infinity?"\u221e":v.toFixed(2)
-const wom=ds=>ds?Math.ceil(new Date(ds).getDate()/7):""
-const fmtD=ds=>{if(!ds)return"";const d=new Date(ds);return`${String(d.getDate()).padStart(2,"0")}/${String(d.getMonth()+1).padStart(2,"0")}/${String(d.getFullYear()).slice(-2)}`}
-const getMo=ds=>ds?new Date(ds).toLocaleString("es",{month:"short"})+" "+String(new Date(ds).getFullYear()).slice(-2):""
-const getYr=ds=>ds?String(new Date(ds).getFullYear()).slice(-2):""
-const cDur=(s,e)=>{if(!s||!e)return"";const[sh,sm]=s.split(":").map(Number),[eh,em]=e.split(":").map(Number);let d=(eh*60+em)-(sh*60+sm);return d<0?d+1440:d}
-const getDN=ds=>ds?new Date(ds).toLocaleString("es",{weekday:"short"}):""
-const gR=t=>t.resultado==="SL"?-1:t.resultado==="BE"?0:pn(t.rResultado)>0?pn(t.rResultado):0
-const gDD=t=>{const s=pn(t.puntosSlStr),d=pn(t.ddPuntos);return s&&d?Math.round(d/s*10000)/100:null}
-const hBucket=h=>{if(!h||!h.includes(":"))return"";const[hh,mm]=h.split(":").map(Number);return`${String(hh).padStart(2,"0")}:${String(Math.floor(mm/5)*5).padStart(2,"0")}`}
-const tradeToDb=(t,uid2)=>({user_id:uid2,fecha:t.fecha,hora_inicio:t.horaInicio,hora_final:t.horaFinal,duracion_trade:t.duracionTrade||"",atr:t.atr,setup:t.setup,contexto:t.contexto,buy_sell:t.buySell,puntos_sl:t.puntosSlStr,r_resultado:t.rResultado,r_maximo:t.rMaximo,resultado:t.resultado,break_rango_m30:t.breakRangoM30,direccion_dia:t.direccionDia,dd_puntos:t.ddPuntos,hay_noticia:t.hayNoticia,noticia_hora:t.noticiaHora,noticia_impacto:t.noticiaImpacto,noticia_tipo:t.noticiaTipo,m5:t.m5,m15:t.m15,m30:t.m30,screenshot:t.screenshot||"",notas:t.notas})
-const dbToTrade=d=>({id:d.id,fecha:d.fecha,horaInicio:d.hora_inicio,horaFinal:d.hora_final,duracionTrade:d.duracion_trade,atr:d.atr,setup:d.setup,contexto:d.contexto,buySell:d.buy_sell,puntosSlStr:d.puntos_sl,rResultado:d.r_resultado,rMaximo:d.r_maximo,resultado:d.resultado,breakRangoM30:d.break_rango_m30,direccionDia:d.direccion_dia,ddPuntos:d.dd_puntos,hayNoticia:d.hay_noticia,noticiaHora:d.noticia_hora,noticiaImpacto:d.noticia_impacto,noticiaTipo:d.noticia_tipo,m5:d.m5,m15:d.m15,m30:d.m30,screenshot:d.screenshot,screenshotPreview:d.screenshot,notas:d.notas})
+const SETUPS   = ["M1", "M2", "M3", "J1", "J2"];
+const CONTEXTOS = ["APERTURA", "ROMPIMIENTO", "GIRO"];
+const DIRECCIONES = ["RANGO", "ALCISTA", "BAJISTA"];
+const RESULTADOS  = ["SL", "BE", "WIN"];
+const BUY_SELL    = ["BUY", "SELL"];
 
-function cS(trades){
-  const z={total:0,wins:0,losses:0,bes:0,winRate:0,totalR:0,totalDollar:0,bestR:0,worstR:-1,profitFactor:0,expectancy:0,expectDollar:0,avgDDpct:0,avgDurWin:0,avgDurSL:0,avgDurBE:0,maxWinStreak:0,maxLossStreak:0,curWinStreak:0,curLossStreak:0,recoveryFactor:0,sharpeRatio:0,payoffRatio:0,sampleValid:false,maxEquityDD:0}
-  if(!trades.length)return z
-  const rs=trades.map(gR),w=rs.filter(r=>r>0),l=rs.filter(r=>r<0),b=rs.filter(r=>r===0)
-  const tR=Math.round(rs.reduce((a,c)=>a+c,0)*100)/100,gw=w.reduce((a,r)=>a+r,0),gl=Math.abs(l.reduce((a,r)=>a+r,0))
-  const dd=trades.map(gDD).filter(v=>v!==null),aDD=dd.length?Math.round(dd.reduce((a,c)=>a+c,0)/dd.length*100)/100:0
-  const exp=Math.round((tR/trades.length)*100)/100
-  const durW=trades.filter(t=>t.resultado==="WIN").map(t=>pn(t.duracionTrade)).filter(v=>v>0)
-  const durS=trades.filter(t=>t.resultado==="SL").map(t=>pn(t.duracionTrade)).filter(v=>v>0)
-  const durB=trades.filter(t=>t.resultado==="BE").map(t=>pn(t.duracionTrade)).filter(v=>v>0)
-  let mxW=0,mxL=0,cW=0,cL=0
-  const sorted=[...trades].sort((a,b2)=>new Date(a.fecha)-new Date(b2.fecha))
-  sorted.forEach(t=>{const r=gR(t);if(r>0){cW++;cL=0}else if(r<0){cL++;cW=0}else{cW=0;cL=0};mxW=Math.max(mxW,cW);mxL=Math.max(mxL,cL)})
-  let peak=0,maxDD2=0,cum=0
-  sorted.forEach(t=>{cum+=gR(t);if(cum>peak)peak=cum;const d2=peak-cum;if(d2>maxDD2)maxDD2=d2})
-  const recovF=maxDD2>0?Math.round(tR/maxDD2*100)/100:tR>0?Infinity:0
-  const mean=tR/trades.length,variance=rs.reduce((a,r)=>a+Math.pow(r-mean,2),0)/rs.length
-  const sharpe=Math.sqrt(variance)>0?Math.round(mean/Math.sqrt(variance)*100)/100:0
-  const avgWR=w.length?gw/w.length:0,avgLR=l.length?gl/l.length:1
-  const payoff=avgLR>0?Math.round(avgWR/avgLR*100)/100:avgWR>0?Infinity:0
-  return{total:trades.length,wins:w.length,losses:l.length,bes:b.length,winRate:Math.round(w.length/trades.length*10000)/100,totalR:tR,totalDollar:Math.round(tR*RV),bestR:rs.length?Math.max(...rs):0,worstR:rs.length?Math.min(...rs):0,profitFactor:gl?Math.round(gw/gl*10000)/10000:gw>0?Infinity:0,expectancy:exp,expectDollar:Math.round(exp*RV),avgDDpct:aDD,avgDurWin:durW.length?Math.round(durW.reduce((a,c)=>a+c,0)/durW.length):0,avgDurSL:durS.length?Math.round(durS.reduce((a,c)=>a+c,0)/durS.length):0,avgDurBE:durB.length?Math.round(durB.reduce((a,c)=>a+c,0)/durB.length):0,maxWinStreak:mxW,maxLossStreak:mxL,curWinStreak:cW,curLossStreak:cL,recoveryFactor:recovF,sharpeRatio:sharpe,payoffRatio:payoff,sampleValid:trades.length>=30,maxEquityDD:Math.round(maxDD2*100)/100}
-}
-const grpBy=(trades,fn)=>{const m={};trades.forEach(t=>{const k=fn(t);if(k)(m[k]??=[]).push(t)});return Object.entries(m).sort((a,b)=>b[0].localeCompare(a[0])).map(([k,ts])=>({key:k,...cS(ts)}))}
-function extraS(trades){if(!trades.length)return{bestDay:"-",worstDay:"-",avgOps:0,bestWd:"-",worstWd:"-"};const bd={};trades.forEach(t=>{if(t.fecha)(bd[t.fecha]??=[]).push(t)});const dt=Object.entries(bd).map(([d,ts])=>({d,r:ts.reduce((a,t)=>a+gR(t),0)}));const best=dt.reduce((a,x)=>x.r>a.r?x:a,dt[0]),worst=dt.reduce((a,x)=>x.r<a.r?x:a,dt[0]);const bw2={};trades.forEach(t=>{if(!t.fecha)return;(bw2[getDN(t.fecha)]??=[]).push(t)});const wt=Object.entries(bw2).map(([wd,ts])=>({wd,r:ts.reduce((a,t)=>a+gR(t),0)}));const bw=wt.reduce((a,x)=>x.r>a.r?x:a,wt[0]),ww=wt.reduce((a,x)=>x.r<a.r?x:a,wt[0]);return{bestDay:`${fmtD(best.d)} (${best.r>0?"+":""}${Math.round(best.r*100)/100}R)`,worstDay:`${fmtD(worst.d)} (${worst.r>0?"+":""}${Math.round(worst.r*100)/100}R)`,avgOps:Math.round(trades.length/Object.keys(bd).length*100)/100,bestWd:`${bw.wd} (${bw.r>0?"+":""}${Math.round(bw.r*100)/100}R)`,worstWd:`${ww.wd} (${ww.r>0?"+":""}${Math.round(ww.r*100)/100}R)`}}
-function rDist(trades,field){const vs=trades.filter(t=>t.resultado==="WIN").map(t=>Math.round(pn(t[field]))).filter(v=>v>0);if(!vs.length)return{lvl:[],cnt:[],pct:[]};const mx=Math.max(...vs),lvl=[],cnt=[],pct=[];for(let r=1;r<=Math.min(mx,15);r++){const c=vs.filter(v=>v===r).length;lvl.push(r+"R");cnt.push(c);pct.push(Math.round(c/vs.length*10000)/100)};if(vs.some(v=>v>15)){const c=vs.filter(v=>v>15).length;lvl.push("16R+");cnt.push(c);pct.push(Math.round(c/vs.length*10000)/100)};return{lvl,cnt,pct}}
-function hourAnalysis(trades){const bh={};trades.forEach(t=>{const b=hBucket(t.horaInicio);if(b)(bh[b]??=[]).push(t)});return Object.entries(bh).sort((a,b)=>a[0].localeCompare(b[0])).map(([h,ts])=>{const s=cS(ts),rm=ts.filter(t=>t.resultado==="WIN").map(t=>pn(t.rMaximo)).filter(v=>v>0);return{hour:h,...s,avgRmax:rm.length?Math.round(rm.reduce((a,c)=>a+c,0)/rm.length*100)/100:0}})}
-function atrAnalysis(trades){return[[0,10,"0-10"],[10,15,"10-15"],[15,20,"15-20"],[20,25,"20-25"],[25,30,"25-30"],[30,40,"30-40"],[40,999,"40+"]].map(([lo,hi,label])=>({range:label,...cS(trades.filter(t=>{const a=pn(t.atr);return a>lo&&a<=hi}))})).filter(x=>x.total>0)}
-function slAnalysis(trades){return[[0,15,"1-15"],[15,20,"15-20"],[20,25,"20-25"],[25,30,"25-30"],[30,40,"30-40"],[40,999,"40+"]].map(([lo,hi,label])=>({range:label,...cS(trades.filter(t=>{const p=pn(t.puntosSlStr);return p>lo&&p<=hi}))})).filter(x=>x.total>0)}
-function suggestions(trades){if(trades.length<5)return[];const tips=[],s=cS(trades),ha=hourAnalysis(trades),aa=atrAnalysis(trades),sa=slAnalysis(trades);if(ha.length){const best=ha.reduce((a,x)=>x.totalR>a.totalR?x:a,ha[0]);if(best.total>=3)tips.push({type:"green",text:`Mejor hora: ${best.hour} ${best.winRate.toFixed(2)}%WR ${best.totalR>0?"+":""}${best.totalR}R`})};if(ha.length){const worst=ha.reduce((a,x)=>x.totalR<a.totalR?x:a,ha[0]);if(worst.total>=3&&worst.totalR<0)tips.push({type:"red",text:`Evita ${worst.hour}: ${worst.totalR}R`})};if(aa.length>1){const best=aa.reduce((a,x)=>x.winRate>a.winRate&&x.total>=3?x:a,aa[0]);tips.push({type:"green",text:`ATR ${best.range}: ${best.winRate.toFixed(2)}%WR`})};if(sa.length>1){const best=sa.reduce((a,x)=>x.winRate>a.winRate&&x.total>=3?x:a,sa[0]);tips.push({type:"green",text:`SL ${best.range}pts: ${best.winRate.toFixed(2)}%WR`})};const wt=trades.filter(t=>t.resultado==="WIN"&&pn(t.rMaximo)>0&&pn(t.rResultado)>0);if(wt.length>=3){const at2=Math.round(wt.reduce((a,t)=>a+pn(t.rResultado),0)/wt.length*100)/100;const am=Math.round(wt.reduce((a,t)=>a+pn(t.rMaximo),0)/wt.length*100)/100;tips.push({type:Math.round(at2/am*100)<50?"yellow":"green",text:`Capturas ${at2}R de ${am}R (${Math.round(at2/am*100)}%)`})};if(s.avgDurWin&&s.avgDurSL)tips.push({type:"blue",text:`Dur: WIN=${s.avgDurWin}m SL=${s.avgDurSL}m`});if(s.maxLossStreak>=3)tips.push({type:"red",text:`Racha loss max: ${s.maxLossStreak}${s.curLossStreak>=2?" ALERTA:"+s.curLossStreak:""}`});if(s.recoveryFactor!==Infinity&&s.recoveryFactor>0)tips.push({type:s.recoveryFactor>=2?"green":"yellow",text:`Recovery: ${s.recoveryFactor.toFixed(2)}`});if(s.sharpeRatio!==0)tips.push({type:s.sharpeRatio>=1?"green":"yellow",text:`Sharpe: ${s.sharpeRatio.toFixed(2)}`});if(!s.sampleValid)tips.push({type:"yellow",text:`${s.total}/30 trades min`});return tips}
+const NOTICIAS_HORAS   = ["08:30", "09:45", "10:00", "10:30"];
+const NOTICIAS_IMPACTO = ["ALTO", "MEDIO", "BAJO"];
+const NOTICIAS_TIPO    = [
+  "NFP","CPI","PPI","FOMC","JOBLESS CLAIMS",
+  "GDP","RETAIL SALES","ISM","PCE","OTRA",
+];
 
-const HOURS=[];for(let h=0;h<24;h++)for(let m=0;m<60;m++)HOURS.push(`${String(h).padStart(2,"0")}:${String(m).padStart(2,"0")}`)
-const TPick=({value,onChange,label})=><div className="field"><label>{label}</label><select className="inp" value={value} onChange={e=>onChange(e.target.value)}>{HOURS.map(h=><option key={h} value={h}>{h}</option>)}</select></div>
-const Met=({label,value,sub,color,big})=><div className="mc"><div className="ml">{label}</div><div className={`mv${big?" big":""}`} style={{color}}>{value}</div>{sub&&<div className="ms">{sub}</div>}</div>
-const RTag=({res})=><span className={`tag ${res==="SL"?"tr":res==="BE"?"ty":"tg"}`}>{res}</span>
-const DTag=({dir})=><span className={`tag ${dir==="ALCISTA"?"tg":dir==="BAJISTA"?"tr":"ty"}`}>{dir}</span>
-const STag=({s})=><span className="tag ta">{s}</span>
-const BSTag=({bs})=><span className={`tag ${bs==="BUY"?"tg":"tr"}`}>{bs}</span>
-const EC=({trades})=>{if(trades.length<2)return<div className="em">Min 2</div>;const sorted=[...trades].sort((a,b)=>new Date(a.fecha)-new Date(b.fecha));let cum=0;const pts=[0,...sorted.map(t=>(cum+=gR(t),Math.round(cum*100)/100))];const mn=Math.min(...pts),mx=Math.max(...pts),rng=mx-mn||1,w=600,h=180,p=40,tx=i=>p+(i/(pts.length-1))*(w-p*2),ty=v=>h-p-((v-mn)/rng)*(h-p*2);const line=pts.map((v,i)=>`${i===0?"M":"L"} ${tx(i).toFixed(1)} ${ty(v).toFixed(1)}`).join(" ");const area=line+` L ${tx(pts.length-1).toFixed(1)} ${ty(mn).toFixed(1)} L ${tx(0).toFixed(1)} ${ty(mn).toFixed(1)} Z`;const col=cum>=0?"var(--green)":"var(--red)";return<svg viewBox={`0 0 ${w} ${h}`} style={{width:"100%",display:"block"}}><defs><linearGradient id="eF" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={col} stopOpacity={.25}/><stop offset="100%" stopColor={col} stopOpacity={0}/></linearGradient></defs>{[0,.25,.5,.75,1].map((pc,i)=>{const y=ty(mn+pc*rng);return<g key={i}><line x1={p} y1={y} x2={w-p} y2={y} stroke="var(--border)" strokeWidth={.5} strokeDasharray="4 4"/><text x={p-6} y={y+4} textAnchor="end" fill="var(--text3)" fontSize={10} fontFamily="var(--mono)">{Math.round((mn+pc*rng)*10)/10}R</text></g>})}<path d={area} fill="url(#eF)"/><path d={line} fill="none" stroke={col} strokeWidth={2.5} strokeLinejoin="round"/><circle cx={tx(pts.length-1)} cy={ty(pts[pts.length-1])} r={4} fill={col}/></svg>}
-const BC=({data,labels,height=130,unit="",colors})=>{if(!data.length||data.every(v=>v===0))return<div className="em">-</div>;const max=Math.max(...data.map(Math.abs),.1),bw=Math.min(44,Math.max(18,300/data.length)),tw=data.length*(bw+6)+16,bl=height-12;return<div style={{overflowX:"auto"}}><svg width={Math.max(tw,200)} height={height+28}><line x1={8} y1={bl} x2={tw} y2={bl} stroke="var(--border)" strokeWidth={1}/>{data.map((v,i)=>{const bh=Math.abs(v)/max*(height-30),x=i*(bw+6)+12,pos=v>=0,y=pos?bl-bh:bl,fill=colors?colors[i]:pos?"var(--green)":"var(--red)";return<g key={i}><rect x={x} y={y} width={bw} height={Math.max(bh,2)} rx={3} fill={fill} opacity={.85}/><text x={x+bw/2} y={pos?y-4:y+bh+12} textAnchor="middle" fill="var(--text2)" fontSize={9} fontFamily="var(--mono)">{Math.round(v*10)/10}{unit}</text><text x={x+bw/2} y={height+22} textAnchor="middle" fill="var(--text3)" fontSize={8} fontFamily="var(--mono)">{labels?.[i]}</text></g>})}</svg></div>}
-const Cal=({trades,month,year,onPrev,onNext})=>{const dim=new Date(year,month+1,0).getDate(),fd=new Date(year,month,1).getDay(),mn2=new Date(year,month).toLocaleString("es",{month:"long",year:"numeric"});const bd={};trades.forEach(t=>{if(!t.fecha)return;const d=new Date(t.fecha);if(d.getMonth()===month&&d.getFullYear()===year)(bd[d.getDate()]??=[]).push(t)});const cells=[];for(let i=0;i<fd;i++)cells.push(null);for(let d=1;d<=dim;d++)cells.push(d);const weeks=[];for(let i=0;i<cells.length;i+=7)weeks.push(cells.slice(i,i+7));const ws=weeks.map(wk=>{let r=0,c=0;wk.forEach(d=>{if(d&&bd[d])bd[d].forEach(t=>{r+=gR(t);c++})});return{r:Math.round(r*100)/100,c}});const mt=trades.filter(t=>{if(!t.fecha)return false;const d=new Date(t.fecha);return d.getMonth()===month&&d.getFullYear()===year});const mr=Math.round(mt.reduce((a,t)=>a+gR(t),0)*100)/100;return<div className="card" style={{padding:0,overflow:"hidden"}}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"14px 18px",borderBottom:"1px solid var(--border)"}}><span style={{fontFamily:"var(--mono)",fontWeight:700,fontSize:15,textTransform:"capitalize"}}>{mn2}</span><div style={{display:"flex",gap:6}}><button className="btn bo bx" onClick={onPrev}>&lt;</button><button className="btn bo bx" onClick={onNext}>&gt;</button></div></div><div style={{display:"grid",gridTemplateColumns:"repeat(8,1fr)",fontSize:10,fontFamily:"var(--mono)"}}>{["Do","Lu","Ma","Mi","Ju","Vi","Sa","Sem"].map(d=><div key={d} style={{padding:"8px 4px",textAlign:"center",color:"var(--text3)",borderBottom:"1px solid var(--border)",fontWeight:600}}>{d}</div>)}{weeks.map((wk,wi)=><React.Fragment key={wi}>{wk.map((d,di)=>{if(!d)return<div key={di} style={{padding:10,borderBottom:"1px solid var(--border)",background:"var(--bg)"}}/>;const dt2=bd[d]||[],dr=Math.round(dt2.reduce((a,t)=>a+gR(t),0)*100)/100,bg=dt2.length?dr>0?"rgba(0,214,143,.08)":dr<0?"rgba(255,71,87,.08)":"var(--surface)":"var(--surface)";return<div key={di} style={{padding:"6px 4px",borderBottom:"1px solid var(--border)",borderRight:"1px solid var(--border)",background:bg,minHeight:55}}><div style={{fontSize:9,color:"var(--text3)",marginBottom:3}}>{d}</div>{dt2.length?<React.Fragment><div style={{fontSize:13,fontWeight:700,color:dr>0?"var(--green)":dr<0?"var(--red)":"var(--yellow)",fontFamily:"var(--mono)"}}>{fmt$(dr*RV)}</div><div style={{fontSize:8,color:"var(--text3)",marginTop:1}}>{dt2.length}t</div></React.Fragment>:<div style={{fontSize:8,color:"var(--text3)"}}>-</div>}</div>})}{Array(Math.max(0,7-wk.length)).fill(null).map((_,i)=><div key={"p"+i} style={{padding:10,borderBottom:"1px solid var(--border)",background:"var(--bg)"}}/>)}<div style={{padding:"6px 4px",borderBottom:"1px solid var(--border)",background:"var(--surface2)",display:"flex",flexDirection:"column",justifyContent:"center",alignItems:"center"}}><div style={{fontSize:8,color:"var(--text3)"}}>S{wi+1}</div><div style={{fontSize:12,fontWeight:700,color:ws[wi].r>0?"var(--green)":ws[wi].r<0?"var(--red)":"var(--text3)",fontFamily:"var(--mono)"}}>{ws[wi].c?fmt$(ws[wi].r*RV):"-"}</div></div></React.Fragment>)}</div><div style={{display:"flex",justifyContent:"flex-end",gap:16,padding:"10px 18px",borderTop:"1px solid var(--border)",background:"var(--surface2)"}}><span style={{fontSize:11,color:"var(--text3)",fontFamily:"var(--mono)"}}>N:<b style={{color:"var(--text)"}}>{mt.length}</b></span><span style={{fontSize:11,color:"var(--text3)",fontFamily:"var(--mono)"}}>P&L:<b style={{color:mr>=0?"var(--green)":"var(--red)"}}>{mr>=0?"+":""}{fmt$(mr*RV)}</b></span></div></div>}
+const MODES = { BT: "bt", JOURNAL: "journal" };
 
-function LoginScreen({onLogin}){
-  const[user,setUser]=useState("")
-  const[pass,setPass]=useState("")
-  const[mode,setMode]=useState("login")
-  const[err,setErr]=useState("")
-  const[loading,setLoading]=useState(false)
-  const go=async()=>{
-    if(!user||!pass)return setErr("Completa ambos campos")
-    setLoading(true);setErr("")
-    try{
-      if(mode==="login"){
-        const users=await supa(`users?username=eq.${encodeURIComponent(user)}&select=*`)
-        if(!users.length)return setErr("Usuario no existe")
-        if(users[0].password!==pass)return setErr("Contrasena incorrecta")
-        localStorage.setItem("bt_user",JSON.stringify({id:users[0].id,username:users[0].username}))
-        onLogin(users[0])
-      }else{
-        if(user.length<3)return setErr("Min 3 caracteres")
-        if(pass.length<4)return setErr("Min 4 caracteres")
-        const ex=await supa(`users?username=eq.${encodeURIComponent(user)}&select=id`)
-        if(ex.length)return setErr("Ya existe")
-        const res=await supa("users","POST",{username:user,password:pass})
-        if(res.length){localStorage.setItem("bt_user",JSON.stringify({id:res[0].id,username:res[0].username}));onLogin(res[0])}
-        else setErr("Error")
-      }
-    }catch(e){setErr("Error conexion")}finally{setLoading(false)}
+// Pestañas disponibles (compartidas BT y Journal)
+const TABS = [
+  { key: "dashboard",  label: "Dashboard" },
+  { key: "calendario", label: "Calendario" },
+  { key: "trades",     label: "Trades" },
+  { key: "nuevo",      label: "Nuevo" },
+  { key: "stats",      label: "Stats" },
+  { key: "setups",     label: "Setups" },
+  { key: "avanzado",   label: "Avanzado" },
+  { key: "tips",       label: "Tips" },
+  { key: "importar",   label: "Importar NT8" }, // solo visible en mode journal
+];
+
+// ── Mapping camelCase <-> snake_case ────────────────────────
+const FIELD_MAP = {
+  horaInicio:     "hora_inicio",
+  horaFinal:      "hora_final",
+  duracionTrade:  "duracion_trade",
+  buySell:        "buy_sell",
+  puntosSl:       "puntos_sl",
+  rResultado:     "r_resultado",
+  rMaximo:        "r_maximo",
+  breakRangoM30:  "break_rango_m30",
+  direccionDia:   "direccion_dia",
+  ddPuntos:       "dd_puntos",
+  hayNoticia:     "hay_noticia",
+  noticiaHora:    "noticia_hora",
+  noticiaImpacto: "noticia_impacto",
+  noticiaTipo:    "noticia_tipo",
+  parentAccount:  "parent_account",
+};
+
+const FIELD_MAP_REV = Object.fromEntries(
+  Object.entries(FIELD_MAP).map(([k, v]) => [v, k])
+);
+
+function tradeToDb(t) {
+  const out = {};
+  for (const [k, v] of Object.entries(t)) {
+    const dbKey = FIELD_MAP[k] || k;
+    out[dbKey] = v;
   }
-  return<div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:"#0a0e14",fontFamily:"'DM Sans',sans-serif"}}><div style={{width:340,background:"#12171f",border:"1px solid #1e2738",borderRadius:16,padding:28}}><h1 style={{fontSize:22,fontWeight:700,color:"#4c9aff",textAlign:"center",marginBottom:4}}>BT Journal</h1><p style={{textAlign:"center",color:"#5a6478",fontSize:11,marginBottom:24,fontFamily:"'JetBrains Mono',monospace"}}>Backtesting Pro</p><div style={{display:"flex",gap:4,marginBottom:18,background:"#0a0e14",borderRadius:8,padding:3}}><button onClick={()=>{setMode("login");setErr("")}} style={{flex:1,padding:7,border:"none",borderRadius:6,cursor:"pointer",fontSize:12,fontWeight:600,background:mode==="login"?"rgba(76,154,255,.12)":"transparent",color:mode==="login"?"#4c9aff":"#5a6478",fontFamily:"inherit"}}>Entrar</button><button onClick={()=>{setMode("register");setErr("")}} style={{flex:1,padding:7,border:"none",borderRadius:6,cursor:"pointer",fontSize:12,fontWeight:600,background:mode==="register"?"rgba(76,154,255,.12)":"transparent",color:mode==="register"?"#4c9aff":"#5a6478",fontFamily:"inherit"}}>Registro</button></div><div style={{display:"flex",flexDirection:"column",gap:10}}><div className="field"><label style={{fontSize:9,color:"#5a6478",textTransform:"uppercase",letterSpacing:".6px",fontWeight:600,fontFamily:"'JetBrains Mono',monospace"}}>Usuario</label><input className="inp" value={user} onChange={e=>setUser(e.target.value.toLowerCase().trim())} onKeyDown={e=>e.key==="Enter"&&go()} style={{background:"#0a0e14",border:"1px solid #2a3548",borderRadius:7,color:"#d4dae4",padding:"9px 11px",fontSize:13,width:"100%",outline:"none",fontFamily:"inherit"}}/></div><div className="field"><label style={{fontSize:9,color:"#5a6478",textTransform:"uppercase",letterSpacing:".6px",fontWeight:600,fontFamily:"'JetBrains Mono',monospace"}}>Contrasena</label><input type="password" value={pass} onChange={e=>setPass(e.target.value)} onKeyDown={e=>e.key==="Enter"&&go()} style={{background:"#0a0e14",border:"1px solid #2a3548",borderRadius:7,color:"#d4dae4",padding:"9px 11px",fontSize:13,width:"100%",outline:"none",fontFamily:"inherit"}}/></div>{err&&<div style={{color:"#ff4757",fontSize:11,fontFamily:"'JetBrains Mono',monospace",textAlign:"center"}}>{err}</div>}<button onClick={go} disabled={loading} style={{width:"100%",marginTop:4,padding:"10px",background:"#4c9aff",color:"#fff",border:"none",borderRadius:7,fontSize:13,fontWeight:600,cursor:"pointer",opacity:loading?.6:1,fontFamily:"inherit"}}>{loading?"...":(mode==="login"?"Entrar":"Crear cuenta")}</button></div></div></div>
+  return out;
 }
 
-function Journal({user,onLogout}){
-  const[trades,setTrades]=useState([])
-  const[loading,setLoading]=useState(true)
-  const[tab,setTab]=useState("dashboard")
-  const[form,setForm]=useState({...DT})
-  const[editId,setEditId]=useState(null)
-  const[fP,setFP]=useState("all")
-  const[fS,setFS]=useState("all")
-  const[fN,setFN]=useState("")
-  const[viewSS,setViewSS]=useState(null)
-  const[sb,setSb]=useState(window.innerWidth>900)
-  const[calMonth,setCalMonth]=useState(new Date().getMonth())
-  const[calYear,setCalYear]=useState(new Date().getFullYear())
-  const[saving,setSaving]=useState(false)
-  const fRef=useRef()
-  const loadT=useCallback(async()=>{try{const data=await supa(`trades?user_id=eq.${user.id}&select=*&order=created_at.desc`);setTrades((data||[]).map(dbToTrade))}catch(e){console.error(e)};setLoading(false)},[user.id])
-  useEffect(()=>{loadT()},[loadT])
-  useEffect(()=>{const fn=()=>setSb(window.innerWidth>900);window.addEventListener("resize",fn);return()=>window.removeEventListener("resize",fn)},[])
-  const setHI=v=>setForm(f=>({...f,horaInicio:v,duracionTrade:String(cDur(v,f.horaFinal)||"")}))
-  const setHF=v=>setForm(f=>({...f,horaFinal:v,duracionTrade:String(cDur(f.horaInicio,v)||"")}))
-  const save=async()=>{if(!form.fecha)return alert("Fecha obligatoria");setSaving(true);const t={...form,semana:String(wom(form.fecha)),duracionTrade:String(cDur(form.horaInicio,form.horaFinal)||"")};if(t.resultado==="SL")t.rResultado="-1";if(t.resultado==="BE")t.rResultado="0";try{if(editId){await supa(`trades?id=eq.${editId}`,"PATCH",tradeToDb(t,user.id));setEditId(null)}else{await supa("trades","POST",tradeToDb(t,user.id))};await loadT()}catch(e){alert("Error")};setForm({...DT});setTab("trades");setSaving(false)}
-  const del=async id=>{if(!confirm("Eliminar?"))return;try{await supa(`trades?id=eq.${id}`,"DELETE");setTrades(ts=>ts.filter(t=>t.id!==id))}catch(e){alert("Error")}}
-  const edit=t=>{setForm({...DT,...t});setEditId(t.id);setTab("addTrade")}
-  const goTab=t=>{setTab(t);if(window.innerWidth<=900)setSb(false);if(t==="addTrade"&&!editId)setForm({...DT})}
-  const exportCSV=()=>{const h=["fecha","horaInicio","horaFinal","duracionTrade","atr","setup","contexto","buySell","puntosSlStr","rResultado","rMaximo","resultado","breakRangoM30","direccionDia","ddPuntos","hayNoticia","noticiaHora","noticiaImpacto","noticiaTipo","m5","m15","m30","notas"];const csv=[h.join(","),...trades.map(t=>h.map(k=>`"${t[k]||""}"`).join(","))].join("\n");const a=document.createElement("a");a.href=URL.createObjectURL(new Blob([csv],{type:"text/csv"}));a.download="bt_journal.csv";a.click()}
-  const importCSV=async e=>{const f=e.target.files[0];if(!f)return;const text=await f.text();const lines=text.split("\n").filter(Boolean);if(lines.length<2)return;const hd=lines[0].split(",").map(h=>h.replace(/"/g,"").trim());const imported=lines.slice(1).map(line=>{const vs=line.match(/(".*?"|[^",]+)/g)?.map(v=>v.replace(/"/g,"").trim())||[];const o={...DT};hd.forEach((h,i)=>{if(vs[i])o[h]=vs[i]});return o});setSaving(true);for(const t of imported){t.duracionTrade=String(cDur(t.horaInicio,t.horaFinal)||"");if(t.resultado==="SL")t.rResultado="-1";if(t.resultado==="BE")t.rResultado="0";await supa("trades","POST",tradeToDb(t,user.id))};await loadT();setSaving(false);alert(`${imported.length} importados`)}
-  const handleFile=e=>{const f=e.target.files[0];if(!f)return;const r=new FileReader();r.onload=ev=>setForm(p=>({...p,screenshot:ev.target.result,screenshotPreview:ev.target.result}));r.readAsDataURL(f)}
-  const F=(l,n,type="text",opts)=><div className="field"><label>{l}</label>{opts?<select className="inp" value={form[n]||""} onChange={e=>setForm(f=>({...f,[n]:e.target.value}))}>{opts.map(o=><option key={o} value={o}>{o||"\u2014"}</option>)}</select>:<input className="inp" type={type} value={form[n]||""} onChange={e=>setForm(f=>({...f,[n]:e.target.value}))} step={type==="number"?"any":undefined}/>}</div>
-  const filtered=useMemo(()=>{let ft=[...trades];if(fS!=="all")ft=ft.filter(t=>t.setup===fS);if(fN){const sorted2=ft.sort((a,b)=>new Date(b.fecha)-new Date(a.fecha));ft=sorted2.slice(0,parseInt(fN)||ft.length)};if(fP!=="all"){const now=new Date();if(fP==="week"){const w=new Date(now-7*864e5);ft=ft.filter(t=>new Date(t.fecha)>=w)}else if(fP==="month")ft=ft.filter(t=>{const d=new Date(t.fecha);return d.getMonth()===now.getMonth()&&d.getFullYear()===now.getFullYear()});else if(fP==="year")ft=ft.filter(t=>new Date(t.fecha).getFullYear()===now.getFullYear())};return ft.sort((a,b)=>new Date(b.fecha)-new Date(a.fecha))},[trades,fP,fS,fN])
-  const stats=useMemo(()=>cS(filtered),[filtered])
-  const extra=useMemo(()=>extraS(filtered),[filtered])
-  const daily=useMemo(()=>grpBy(trades,t=>t.fecha),[trades])
-  const weekly=useMemo(()=>grpBy(trades,t=>t.fecha?`S${wom(t.fecha)} ${getMo(t.fecha)}`:""),[trades])
-  const monthly=useMemo(()=>grpBy(trades,t=>getMo(t.fecha)),[trades])
-  const yearly=useMemo(()=>grpBy(trades,t=>t.fecha?`20${getYr(t.fecha)}`:""),[trades])
-  const setupS=useMemo(()=>{const m={};SETUPS.forEach(s=>m[s]=cS(trades.filter(t=>t.setup===s)));return m},[trades])
-  const rTaken=useMemo(()=>rDist(filtered,"rResultado"),[filtered])
-  const rMx=useMemo(()=>rDist(filtered,"rMaximo"),[filtered])
-  const hSt=useMemo(()=>hourAnalysis(filtered),[filtered])
-  const atrSt=useMemo(()=>atrAnalysis(filtered),[filtered])
-  const slSt=useMemo(()=>slAnalysis(filtered),[filtered])
-  const tips=useMemo(()=>suggestions(filtered),[filtered])
-  const isWin=form.resultado==="WIN",autoDur=cDur(form.horaInicio,form.horaFinal),autoWeek=wom(form.fecha),ddPct=gDD(form)
-  const nav=[{id:"dashboard",l:"Dashboard",i:"\u25C8"},{id:"calendario",l:"Calendario",i:"\u25A6"},{id:"trades",l:"Trades",i:"\u2630"},{id:"addTrade",l:editId?"Editar":"Nuevo",i:"+"},{id:"estadisticas",l:"Stats",i:"\u25A5"},{id:"setups",l:"Setups",i:"\u25C6"},{id:"avanzado",l:"Avanzado",i:"\u25C9"},{id:"tips",l:"Tips",i:"\u2605"}]
-  const STbl=({title,data,cols,row,chart})=><div className="card"><div className="st">{title}</div><div style={{display:"grid",gridTemplateColumns:chart?"minmax(0,1.3fr) minmax(0,1fr)":"1fr",gap:14}}><div style={{overflowX:"auto"}}><table className="tbl"><thead><tr>{cols.map(h=><th key={h}>{h}</th>)}</tr></thead><tbody>{data.map((d,i)=><tr key={i}>{row(d).map((c,j)=>{if(Array.isArray(c))return<td key={j} className={`mono ${c[1]} ${c[2]?"bold":""}`}>{c[0]}</td>;return<td key={j} className="mono">{c}</td>})}</tr>)}</tbody></table>{!data.length&&<div className="em">-</div>}</div>{chart&&<BC data={chart.slice(0,12).reverse().map(w=>w.totalR)} labels={chart.slice(0,12).reverse().map(w=>w.key)} unit="R"/>}</div></div>
-  const Fil=()=><div style={{display:"flex",gap:5,flexWrap:"wrap",alignItems:"center"}}><select className="inp" style={{width:"auto"}} value={fS} onChange={e=>setFS(e.target.value)}><option value="all">All</option>{SETUPS.map(s=><option key={s} value={s}>{s}</option>)}</select><div className="pb">{["all","week","month","year"].map(p=><button key={p} className={`pbtn ${fP===p?"active":""}`} onClick={()=>setFP(p)}>{{all:"All",week:"7d",month:"Mo",year:"Yr"}[p]}</button>)}</div><select className="inp" style={{width:"auto"}} value={fN} onChange={e=>setFN(e.target.value)}><option value="">All</option><option value="10">10</option><option value="20">20</option><option value="50">50</option></select></div>
-  if(loading)return<div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:"#0a0e14",color:"#4c9aff",fontFamily:"'JetBrains Mono',monospace"}}>Cargando...</div>
-
-  return(<>
-    <style>{`@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');:root{--bg:#0a0e14;--surface:#12171f;--surface2:#1a2030;--border:#1e2738;--border2:#2a3548;--text:#d4dae4;--text2:#8892a4;--text3:#5a6478;--accent:#4c9aff;--accent2:#2d7adf;--ad:rgba(76,154,255,.12);--green:#00d68f;--gd:rgba(0,214,143,.12);--red:#ff4757;--rd:rgba(255,71,87,.12);--yellow:#ffc048;--yd:rgba(255,192,72,.12);--purple:#a78bfa;--pd:rgba(167,139,250,.12);--font:'DM Sans',sans-serif;--mono:'JetBrains Mono',monospace;--radius:10px;--rlg:14px}*{box-sizing:border-box;margin:0;padding:0}body{background:var(--bg);color:var(--text);font-family:var(--font);font-size:14px;-webkit-font-smoothing:antialiased}::-webkit-scrollbar{width:6px;height:6px}::-webkit-scrollbar-track{background:transparent}::-webkit-scrollbar-thumb{background:var(--border2);border-radius:3px}.shell{display:flex;min-height:100vh}.sidebar{width:220px;background:var(--surface);border-right:1px solid var(--border);position:fixed;top:0;left:0;bottom:0;display:flex;flex-direction:column;z-index:100}.sidebar.closed{transform:translateX(-220px)}.main{margin-left:220px;padding:24px 28px 60px;flex:1;min-width:0}.main.full{margin-left:0}.mobile-bar{display:none;position:fixed;top:0;left:0;right:0;height:50px;background:var(--surface);border-bottom:1px solid var(--border);z-index:101;align-items:center;padding:0 14px;justify-content:space-between}@media(max-width:900px){.mobile-bar{display:flex}.main{margin-left:0;padding:60px 12px 40px}.sidebar{transform:translateX(-220px)}.sidebar.open{transform:translateX(0)}}.overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:99}.ss-modal{position:fixed;inset:0;background:rgba(0,0,0,.9);z-index:9999;display:flex;align-items:center;justify-content:center;cursor:pointer}.ss-modal img{max-width:92vw;max-height:92vh;border-radius:8px}.sb-brand{padding:18px 14px;border-bottom:1px solid var(--border)}.sb-brand h1{font-size:17px;font-weight:700;color:var(--accent)}.sb-brand p{font-size:10px;color:var(--text3);margin-top:3px;font-family:var(--mono)}.sb-nav{flex:1;padding:6px;display:flex;flex-direction:column;gap:1px;overflow-y:auto}.sb-btn{display:flex;align-items:center;gap:8px;width:100%;padding:8px 10px;background:transparent;color:var(--text2);border:none;cursor:pointer;font:inherit;font-size:11px;font-weight:500;border-radius:6px;text-align:left}.sb-btn:hover{background:var(--surface2);color:var(--text)}.sb-btn.active{background:var(--ad);color:var(--accent)}.sb-footer{padding:10px;border-top:1px solid var(--border);display:flex;flex-direction:column;gap:4px}.sb-footer button,.sb-footer label{display:block;width:100%;padding:6px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text2);font:inherit;font-size:10px;cursor:pointer;text-align:center}.sb-footer button:hover,.sb-footer label:hover{color:var(--text)}.pt{font-size:20px;font-weight:700}.ps{color:var(--text2);font-size:11px;margin-top:2px}.st{font-size:10px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:.6px;margin-bottom:10px;font-family:var(--mono)}.card{background:var(--surface);border:1px solid var(--border);border-radius:var(--rlg);padding:16px;margin-bottom:12px}.ch{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}.metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px;margin-bottom:14px}.mc{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:12px}.ml{font-size:9px;color:var(--text3);font-weight:600;text-transform:uppercase;letter-spacing:.6px;font-family:var(--mono);margin-bottom:4px}.mv{font-size:17px;font-weight:700;font-family:var(--mono);line-height:1}.mv.big{font-size:22px}.ms{font-size:9px;color:var(--text3);margin-top:3px;font-family:var(--mono)}.tag{display:inline-block;padding:2px 6px;border-radius:4px;font-size:9px;font-weight:600;font-family:var(--mono)}.tg{background:var(--gd);color:var(--green)}.tr{background:var(--rd);color:var(--red)}.ty{background:var(--yd);color:var(--yellow)}.ta{background:var(--ad);color:var(--accent)}.tp{background:var(--pd);color:var(--purple)}.tbl{width:100%;border-collapse:collapse;font-size:11px}.tbl th{text-align:left;padding:6px 8px;border-bottom:1px solid var(--border);color:var(--text3);font-weight:600;font-size:8px;text-transform:uppercase;letter-spacing:.5px;font-family:var(--mono);white-space:nowrap}.tbl td{padding:6px 8px;border-bottom:1px solid var(--border)}.tbl tr:hover td{background:var(--surface2)}.tbl .mono{font-family:var(--mono)}.tbl .g{color:var(--green)}.tbl .r{color:var(--red)}.tbl .y{color:var(--yellow)}.tbl .bold{font-weight:600}.form-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}.field{display:flex;flex-direction:column;gap:3px}.field label{font-size:8px;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;font-weight:600;font-family:var(--mono)}.inp{background:var(--bg);border:1px solid var(--border2);border-radius:6px;color:var(--text);padding:8px 10px;font:inherit;font-size:12px;width:100%;outline:none}.inp:focus{border-color:var(--accent)}select.inp{cursor:pointer;appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 24 24' fill='none' stroke='%235a6478' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 8px center;padding-right:24px}textarea.inp{resize:vertical;min-height:80px}input[type="date"]::-webkit-calendar-picker-indicator{filter:invert(.6)}.btn{border:none;border-radius:6px;padding:8px 16px;font:inherit;font-size:12px;font-weight:600;cursor:pointer}.bp{background:var(--accent);color:#fff}.bo{background:transparent;color:var(--text2);border:1px solid var(--border2)}.bd{background:var(--rd);color:var(--red)}.bs{padding:4px 10px;font-size:10px}.bx{padding:3px 6px;font-size:9px}.pb{display:flex;gap:2px;background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:2px}.pbtn{padding:4px 8px;border:none;background:transparent;color:var(--text3);font:inherit;font-size:10px;cursor:pointer;border-radius:4px}.pbtn.active{background:var(--ad);color:var(--accent)}.em{text-align:center;padding:16px;color:var(--text3);font-size:11px}.g2{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:10px}.g3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}@media(max-width:700px){.g2,.g3{grid-template-columns:1fr}}.uz{border:2px dashed var(--border2);border-radius:8px;padding:16px;text-align:center;cursor:pointer;color:var(--text3);display:flex;flex-direction:column;align-items:center;gap:4px;min-height:60px}.uz:hover{border-color:var(--accent)}.uz img{max-width:100%;max-height:100px;border-radius:6px}.sc{border-left:3px solid var(--border2)}.sc.profit{border-left-color:var(--green)}.sc.loss{border-left-color:var(--red)}.af{background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:8px 10px;font-family:var(--mono);font-size:12px;color:var(--accent)}.info-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:8px;margin-top:10px}.info-item{background:var(--bg);border-radius:6px;padding:10px}.info-item .val{font-family:var(--mono);font-weight:600;font-size:11px;margin-top:3px}.tip-card{padding:10px 12px;border-radius:6px;margin-bottom:6px;font-size:11px;display:flex;align-items:flex-start;gap:8px}.tip-card .dot{width:6px;height:6px;border-radius:50%;flex-shrink:0;margin-top:4px}@keyframes fadeIn{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}.card,.mc{animation:fadeIn .25s ease both}`}</style>
-    <div className="shell">
-      {viewSS&&<div className="ss-modal" onClick={()=>setViewSS(null)}><img src={viewSS}/></div>}
-      {sb&&window.innerWidth<=900&&<div className="overlay" onClick={()=>setSb(false)}/>}
-      <div className="mobile-bar"><button onClick={()=>setSb(!sb)} style={{background:"none",border:"none",color:"var(--text)",fontSize:18,cursor:"pointer"}}>{"\u2630"}</button><span style={{fontWeight:700,color:"var(--accent)",fontFamily:"var(--mono)",fontSize:12}}>BT JOURNAL</span><div style={{width:24}}/></div>
-      <div className={`sidebar ${sb?"open":"closed"}`}><div className="sb-brand"><h1>BT Journal</h1><p>{user.username}</p></div><nav className="sb-nav">{nav.map(n=><button key={n.id} className={`sb-btn ${tab===n.id?"active":""}`} onClick={()=>goTab(n.id)}><span style={{fontFamily:"var(--mono)",fontSize:12,width:14}}>{n.i}</span><span>{n.l}</span></button>)}</nav><div className="sb-footer"><button onClick={exportCSV}>Export</button><label>Import CSV<input type="file" accept=".csv" onChange={importCSV} style={{display:"none"}}/></label><button onClick={onLogout} style={{color:"var(--red)"}}>Salir</button></div></div>
-      <div className={`main ${!sb||window.innerWidth<=900?"full":""}`}>
-      {saving&&<div style={{position:"fixed",top:0,left:0,right:0,height:3,background:"var(--accent)",zIndex:999}}/>}
-
-{tab==="dashboard"&&<><div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:16,flexWrap:"wrap",gap:8}}><div><h1 className="pt">Dashboard</h1><p className="ps">{trades.length} trades | 1R={fmt$(RV)}</p></div><Fil/></div>
-<div className="metrics"><Met label="P&L" value={`${stats.totalR>=0?"+":""}${stats.totalR}R`} sub={fmt$(stats.totalDollar)} color={stats.totalR>=0?"var(--green)":"var(--red)"} big/><Met label="Win%" value={`${stats.winRate.toFixed(2)}%`} color={stats.winRate>=50?"var(--green)":"var(--red)"} sub={`${stats.wins}W|${stats.losses}L|${stats.bes}BE`}/><Met label="PF" value={fmtPF(stats.profitFactor)} color={stats.profitFactor>=1.5?"var(--green)":stats.profitFactor>=1?"var(--yellow)":"var(--red)"}/><Met label="Expect" value={`${stats.expectancy}R`} color={stats.expectancy>0?"var(--green)":"var(--red)"} sub={fmt$(stats.expectDollar)+"/t"}/><Met label="Sharpe" value={stats.sharpeRatio.toFixed(2)} color={stats.sharpeRatio>=1?"var(--green)":"var(--yellow)"}/><Met label="Recovery" value={stats.recoveryFactor===Infinity?"\u221e":stats.recoveryFactor.toFixed(2)} color={stats.recoveryFactor>=2?"var(--green)":"var(--yellow)"} sub={`DD:${stats.maxEquityDD}R`}/><Met label="Payoff" value={stats.payoffRatio===Infinity?"\u221e":stats.payoffRatio.toFixed(2)} color={stats.payoffRatio>=2?"var(--green)":"var(--yellow)"}/><Met label="DD%" value={`${stats.avgDDpct}%`} color="var(--purple)"/><Met label="N" value={stats.total} sub={stats.sampleValid?"OK":"<30"}/></div>
-<div className="card"><div className="st">Resumen</div><div className="info-grid"><div className="info-item"><div className="ml">Mejor dia</div><div className="val" style={{color:"var(--green)"}}>{extra.bestDay}</div></div><div className="info-item"><div className="ml">Peor dia</div><div className="val" style={{color:"var(--red)"}}>{extra.worstDay}</div></div><div className="info-item"><div className="ml">Ops/dia</div><div className="val">{extra.avgOps}</div></div><div className="info-item"><div className="ml">Mejor weekday</div><div className="val" style={{color:"var(--green)"}}>{extra.bestWd}</div></div><div className="info-item"><div className="ml">Racha WIN</div><div className="val" style={{color:"var(--green)"}}>{stats.maxWinStreak}{stats.curWinStreak>1?` (${stats.curWinStreak})`:""}</div></div><div className="info-item"><div className="ml">Racha LOSS</div><div className="val" style={{color:"var(--red)"}}>{stats.maxLossStreak}{stats.curLossStreak>1?` (${stats.curLossStreak})`:""}</div></div><div className="info-item"><div className="ml">Dur WIN</div><div className="val">{stats.avgDurWin}m</div></div><div className="info-item"><div className="ml">Dur SL</div><div className="val">{stats.avgDurSL}m</div></div></div></div>
-<div className="g2" style={{marginBottom:10}}><div className="card"><div className="st">Equity</div><EC trades={filtered}/></div><div className="card"><div className="st">Resultados</div><div style={{display:"flex",gap:14,flexWrap:"wrap"}}>{[["WIN",stats.wins,"var(--green)"],["SL",stats.losses,"var(--red)"],["BE",stats.bes,"var(--yellow)"]].map(([l,v,c])=><div key={l} style={{textAlign:"center"}}><div style={{fontSize:22,fontWeight:700,fontFamily:"var(--mono)",color:c}}>{stats.total?Math.round(v/stats.total*10000)/100:0}%</div><div style={{fontSize:9,color:"var(--text3)"}}>{l}({v})</div></div>)}</div></div></div>
-<div className="card"><div className="st">P&L diario</div><BC data={daily.slice(0,20).reverse().map(d=>d.totalR)} labels={daily.slice(0,20).reverse().map(d=>fmtD(d.key))} unit="R"/></div>
-<div className="card"><div className="ch"><span className="st" style={{margin:0}}>Recientes</span><button className="btn bo bx" onClick={()=>setTab("trades")}>All</button></div><div style={{overflowX:"auto"}}><table className="tbl"><thead><tr><th>Fecha</th><th>Setup</th><th>B/S</th><th>R</th><th>Rmx</th><th>P&L</th><th>Res</th><th>Dir</th></tr></thead><tbody>{filtered.slice(0,8).map(t=>{const r=gR(t);return<tr key={t.id} style={{cursor:"pointer"}} onClick={()=>edit(t)}><td className="mono">{fmtD(t.fecha)}</td><td><STag s={t.setup}/></td><td><BSTag bs={t.buySell}/></td><td className="mono bold" style={{color:r>0?"var(--green)":r<0?"var(--red)":"var(--yellow)"}}>{fmtR(r)}</td><td className="mono" style={{color:"var(--purple)"}}>{pn(t.rMaximo)>0?t.rMaximo+"R":""}</td><td className="mono bold" style={{color:r>=0?"var(--green)":"var(--red)"}}>{fmt$(r*RV)}</td><td><RTag res={t.resultado}/></td><td><DTag dir={t.direccionDia}/></td></tr>})}</tbody></table></div>{!filtered.length&&<div className="em">Sin trades</div>}</div></>}
-
-{tab==="calendario"&&<><h1 className="pt" style={{marginBottom:14}}>Calendario</h1><Cal trades={trades} month={calMonth} year={calYear} onPrev={()=>{calMonth===0?(setCalMonth(11),setCalYear(calYear-1)):setCalMonth(calMonth-1)}} onNext={()=>{calMonth===11?(setCalMonth(0),setCalYear(calYear+1)):setCalMonth(calMonth+1)}}/></>}
-
-{tab==="trades"&&<><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12,flexWrap:"wrap",gap:8}}><h1 className="pt">Trades</h1><div style={{display:"flex",gap:6,flexWrap:"wrap",alignItems:"center"}}><Fil/><button className="btn bp bs" onClick={()=>goTab("addTrade")}>+</button></div></div><div className="card" style={{overflowX:"auto"}}><table className="tbl" style={{minWidth:1100}}><thead><tr>{["Fecha","S","Hora","Dur","Setup","Ctx","B/S","SL","R","Rmx","P&L","Res","DD%","Brk","Dir","News","M5","M15","M30","",""].map(h=><th key={h}>{h}</th>)}</tr></thead><tbody>{filtered.map(t=>{const r=gR(t),dd=gDD(t);return<tr key={t.id}><td className="mono">{fmtD(t.fecha)}</td><td className="mono">S{wom(t.fecha)}</td><td className="mono" style={{fontSize:9}}>{t.horaInicio}{">"}{t.horaFinal}</td><td className="mono">{t.duracionTrade?t.duracionTrade+"m":""}</td><td><STag s={t.setup}/></td><td style={{fontSize:9}}>{t.contexto}</td><td><BSTag bs={t.buySell}/></td><td className="mono">{t.puntosSlStr}</td><td className="mono bold" style={{color:r>0?"var(--green)":r<0?"var(--red)":"var(--yellow)"}}>{fmtR(r)}</td><td className="mono" style={{color:"var(--purple)"}}>{pn(t.rMaximo)>0?t.rMaximo+"R":""}</td><td className="mono bold" style={{color:r>=0?"var(--green)":"var(--red)"}}>{fmt$(r*RV)}</td><td><RTag res={t.resultado}/></td><td className="mono" style={{color:"var(--purple)"}}>{dd!==null?dd+"%":""}</td><td>{t.breakRangoM30}</td><td><DTag dir={t.direccionDia}/></td><td>{t.hayNoticia==="SI"?<span className="tag tp">{t.noticiaHora}</span>:""}</td><td className="mono">{t.m5}</td><td className="mono">{t.m15}</td><td className="mono">{t.m30}</td><td>{t.screenshot?<span style={{cursor:"pointer",color:"var(--accent)"}} onClick={()=>setViewSS(t.screenshot)}>img</span>:""}</td><td><div style={{display:"flex",gap:2}}><button className="btn bo bx" onClick={()=>edit(t)}>E</button><button className="btn bd bx" onClick={()=>del(t.id)}>X</button></div></td></tr>})}</tbody></table>{!filtered.length&&<div className="em">-</div>}</div></>}
-
-{tab==="addTrade"&&<><h1 className="pt" style={{marginBottom:12}}>{editId?"Editar":"Nuevo"}</h1>
-<div className="card"><div className="st">General</div><div className="form-grid">{F("Fecha","fecha","date")}<div className="field"><label>Sem</label><div className="af">S{autoWeek||"-"}</div></div><TPick label="H.Ini" value={form.horaInicio} onChange={setHI}/><TPick label="H.Fin" value={form.horaFinal} onChange={setHF}/><div className="field"><label>Dur</label><div className="af">{autoDur?autoDur+"m":"-"}</div></div>{F("ATR","atr","number")}</div></div>
-<div className="card"><div className="st">Trade</div><div className="form-grid">{F("Setup","setup",null,SETUPS)}{F("Contexto","contexto",null,CTXS)}{F("B/S","buySell",null,["BUY","SELL"])}{F("SL pts","puntosSlStr","number")}{F("DD pts","ddPuntos","number")}<div className="field"><label>DD%</label><div className="af" style={{color:ddPct&&ddPct>50?"var(--red)":"var(--purple)"}}>{ddPct!==null?ddPct+"%":"-"}</div></div></div></div>
-<div className="card"><div className="st">Resultado</div><div className="form-grid">{F("Result","resultado",null,RESS)}{isWin&&F("R ganados","rResultado","number")}{isWin&&F("R max mov","rMaximo","number")}{F("Brk M30","breakRangoM30",null,["NO","SI"])}{F("Dir","direccionDia",null,DIRS)}</div>{form.resultado==="SL"&&<p style={{marginTop:6,fontSize:11,color:"var(--red)",fontFamily:"var(--mono)"}}>-1R=-{fmt$(RV)}</p>}{form.resultado==="BE"&&<p style={{marginTop:6,fontSize:11,color:"var(--yellow)",fontFamily:"var(--mono)"}}>0R=$0</p>}{isWin&&pn(form.rResultado)>0&&<p style={{marginTop:6,fontSize:11,color:"var(--green)",fontFamily:"var(--mono)"}}>+{form.rResultado}R=+{fmt$(pn(form.rResultado)*RV)}{pn(form.rMaximo)>0?` (max ${form.rMaximo}R)`:""}</p>}</div>
-<div className="card"><div className="st">Noticias</div><div className="form-grid">{F("Noticia?","hayNoticia",null,["NO","SI"])}{form.hayNoticia==="SI"&&F("Hora","noticiaHora",null,NHS)}{form.hayNoticia==="SI"&&F("Impacto","noticiaImpacto",null,NIS)}{form.hayNoticia==="SI"&&F("Tipo","noticiaTipo",null,NTS)}</div></div>
-<div className="card"><div className="st">ORB</div><div className="form-grid" style={{gridTemplateColumns:"repeat(3,1fr)"}}>{F("M5","m5","number")}{F("M15","m15","number")}{F("M30","m30","number")}</div></div>
-<div className="card"><div className="st">Img+Notas</div><div className="g2"><div><input ref={fRef} type="file" accept="image/*" onChange={handleFile} style={{display:"none"}}/><div className="uz" onClick={()=>fRef.current?.click()}>{form.screenshotPreview?<img src={form.screenshotPreview}/>:<span style={{fontSize:10}}>Subir</span>}</div></div><div className="field"><label>Notas</label><textarea className="inp" value={form.notas||""} onChange={e=>setForm(f=>({...f,notas:e.target.value}))}/></div></div></div>
-<div style={{display:"flex",gap:8}}><button className="btn bp" onClick={save} disabled={saving}>{saving?"...":editId?"OK":"Registrar"}</button>{editId&&<button className="btn bo" onClick={()=>{setEditId(null);setForm({...DT});setTab("trades")}}>Cancel</button>}</div></>}
-
-{tab==="estadisticas"&&<><h1 className="pt" style={{marginBottom:12}}>Stats</h1><Fil/>
-<STbl title="Dia" data={daily.slice(0,30)} cols={["Fecha","N","W","L","Win%","R","P&L","PF"]} row={d=>[fmtD(d.key),d.total,[d.wins,"g"],[d.losses,"r"],[`${d.winRate.toFixed(2)}%`,d.winRate>=50?"g":"r"],[`${d.totalR>0?"+":""}${d.totalR}R`,d.totalR>=0?"g":"r",true],[fmt$(d.totalDollar),d.totalDollar>=0?"g":"r"],fmtPF(d.profitFactor)]}/>
-<STbl title="Semana" data={weekly} cols={["S","N","W%","R","$","PF"]} row={w=>[w.key,w.total,[`${w.winRate.toFixed(2)}%`,w.winRate>=50?"g":"r"],[`${w.totalR>0?"+":""}${w.totalR}R`,w.totalR>=0?"g":"r",true],[fmt$(w.totalDollar),w.totalDollar>=0?"g":"r"],fmtPF(w.profitFactor)]} chart={weekly}/>
-<STbl title="Mes" data={monthly} cols={["M","N","W%","R","$","PF"]} row={m=>[m.key,m.total,[`${m.winRate.toFixed(2)}%`,m.winRate>=50?"g":"r"],[`${m.totalR>0?"+":""}${m.totalR}R`,m.totalR>=0?"g":"r",true],[fmt$(m.totalDollar),m.totalDollar>=0?"g":"r"],fmtPF(m.profitFactor)]} chart={monthly}/>
-<STbl title="Ano" data={yearly} cols={["Y","N","W%","R","$","PF"]} row={y=>[y.key,y.total,[`${y.winRate.toFixed(2)}%`,y.winRate>=50?"g":"r"],[`${y.totalR>0?"+":""}${y.totalR}R`,y.totalR>=0?"g":"r",true],[fmt$(y.totalDollar),y.totalDollar>=0?"g":"r"],fmtPF(y.profitFactor)]} chart={yearly}/></>}
-
-{tab==="setups"&&<><h1 className="pt" style={{marginBottom:12}}>Setups</h1><div className="g2" style={{marginBottom:12}}>{SETUPS.map(su=>{const s2=setupS[su];return<div key={su} className={`card sc ${s2.totalR>0?"profit":s2.total?"loss":""}`}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}><span style={{fontSize:14,fontWeight:700,color:"var(--accent)",fontFamily:"var(--mono)"}}>{su}</span><span className="tag ta">{s2.total}</span></div><div className="g3" style={{gap:6}}>{[["W%",`${s2.winRate.toFixed(2)}%`,s2.winRate>=50?"var(--green)":"var(--red)"],["P&L",`${s2.totalR>0?"+":""}${s2.totalR}R`,s2.totalR>=0?"var(--green)":"var(--red)"],["PF",fmtPF(s2.profitFactor)]].map(([l,v,c])=><div key={l}><div className="ml">{l}</div><div style={{fontSize:15,fontWeight:700,fontFamily:"var(--mono)",color:c}}>{v}</div></div>)}</div></div>})}</div></>}
-
-{tab==="avanzado"&&<><h1 className="pt" style={{marginBottom:12}}>Avanzado</h1><Fil/>
-<div className="g2" style={{marginBottom:10}}><div className="card"><div className="st">R tomados</div>{rTaken.lvl.length?<><BC data={rTaken.pct} labels={rTaken.lvl} height={100} unit="%" colors={rTaken.lvl.map(()=>"var(--green)")}/><table className="tbl" style={{marginTop:8}}><thead><tr><th>R</th><th>#</th><th>%</th></tr></thead><tbody>{rTaken.lvl.map((l,i)=><tr key={l}><td className="mono g bold">{l}</td><td className="mono">{rTaken.cnt[i]}</td><td className="mono">{rTaken.pct[i]}%</td></tr>)}</tbody></table></>:<div className="em">-</div>}</div>
-<div className="card"><div className="st">R maximo</div>{rMx.lvl.length?<><BC data={rMx.pct} labels={rMx.lvl} height={100} unit="%" colors={rMx.lvl.map(()=>"var(--purple)")}/><table className="tbl" style={{marginTop:8}}><thead><tr><th>Rmx</th><th>#</th><th>%</th></tr></thead><tbody>{rMx.lvl.map((l,i)=><tr key={l}><td className="mono bold" style={{color:"var(--purple)"}}>{l}</td><td className="mono">{rMx.cnt[i]}</td><td className="mono">{rMx.pct[i]}%</td></tr>)}</tbody></table></>:<div className="em">-</div>}</div></div>
-<div className="card"><div className="st">Por hora</div>{hSt.length?<><table className="tbl"><thead><tr><th>Hora</th><th>N</th><th>W%</th><th>SL%</th><th>R</th><th>PF</th></tr></thead><tbody>{hSt.map(h=><tr key={h.hour}><td className="mono bold">{h.hour}</td><td className="mono">{h.total}</td><td className={`mono ${h.winRate>=50?"g":"r"}`}>{h.winRate.toFixed(2)}%</td><td className="mono r">{h.total?Math.round(h.losses/h.total*100):0}%</td><td className={`mono bold ${h.totalR>=0?"g":"r"}`}>{h.totalR>0?"+":""}{h.totalR}R</td><td className="mono">{fmtPF(h.profitFactor)}</td></tr>)}</tbody></table><BC data={hSt.map(h=>h.winRate)} labels={hSt.map(h=>h.hour)} height={100} unit="%" colors={hSt.map(h=>h.winRate>=50?"var(--green)":"var(--red)")}/></>:<div className="em">-</div>}</div>
-<div className="card"><div className="st">Por ATR</div>{atrSt.length?<table className="tbl"><thead><tr><th>ATR</th><th>N</th><th>W%</th><th>R</th><th>PF</th></tr></thead><tbody>{atrSt.map(a=><tr key={a.range}><td className="mono bold">{a.range}</td><td className="mono">{a.total}</td><td className={`mono ${a.winRate>=50?"g":"r"}`}>{a.winRate.toFixed(2)}%</td><td className={`mono bold ${a.totalR>=0?"g":"r"}`}>{a.totalR>0?"+":""}{a.totalR}R</td><td className="mono">{fmtPF(a.profitFactor)}</td></tr>)}</tbody></table>:<div className="em">-</div>}</div>
-<div className="card"><div className="st">Por SL</div>{slSt.length?<table className="tbl"><thead><tr><th>SL</th><th>N</th><th>W%</th><th>R</th><th>PF</th></tr></thead><tbody>{slSt.map(s2=><tr key={s2.range}><td className="mono bold">{s2.range}</td><td className="mono">{s2.total}</td><td className={`mono ${s2.winRate>=50?"g":"r"}`}>{s2.winRate.toFixed(2)}%</td><td className={`mono bold ${s2.totalR>=0?"g":"r"}`}>{s2.totalR>0?"+":""}{s2.totalR}R</td><td className="mono">{fmtPF(s2.profitFactor)}</td></tr>)}</tbody></table>:<div className="em">-</div>}</div></>}
-
-{tab==="tips"&&<><h1 className="pt" style={{marginBottom:12}}>Tips</h1><p className="ps" style={{marginBottom:14}}>{filtered.length} trades</p>{tips.length?tips.map((t,i)=>{const c={green:{bg:"rgba(0,214,143,.08)",b:"var(--green)"},red:{bg:"rgba(255,71,87,.08)",b:"var(--red)"},yellow:{bg:"rgba(255,192,72,.08)",b:"var(--yellow)"},blue:{bg:"rgba(76,154,255,.08)",b:"var(--accent)"}}[t.type]||{bg:"var(--surface2)",b:"var(--text3)"};return<div key={i} className="tip-card" style={{background:c.bg,borderLeft:`3px solid ${c.b}`}}><div className="dot" style={{background:c.b}}/><span>{t.text}</span></div>}):<div className="em">Min 5 trades</div>}</>}
-
-      </div></div></>)
+function dbToTrade(row) {
+  const out = {};
+  for (const [k, v] of Object.entries(row)) {
+    const jsKey = FIELD_MAP_REV[k] || k;
+    out[jsKey] = v;
+  }
+  return out;
 }
 
-function App(){
-  const[user,setUser]=useState(()=>{try{return JSON.parse(localStorage.getItem("bt_user"))}catch{return null}})
-  const logout=()=>{localStorage.removeItem("bt_user");setUser(null)}
-  if(!user)return<LoginScreen onLogin={u=>setUser({id:u.id,username:u.username})}/>
-  return<Journal user={user} onLogout={logout}/>
+// ── Helpers de fecha / hora ─────────────────────────────────
+function fmtDate(iso) {
+  // YYYY-MM-DD -> DD/MM/YY
+  if (!iso) return "";
+  const [y, m, d] = iso.split("-");
+  return `${d}/${m}/${y.slice(2)}`;
 }
-ReactDOM.createRoot(document.getElementById('root')).render(<React.StrictMode><App/></React.StrictMode>)
+
+function isoFromParts(d, m, y) {
+  return `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+}
+
+function weekOfMonth(isoDate) {
+  if (!isoDate) return "";
+  const d = new Date(isoDate + "T00:00:00");
+  const day = d.getDate();
+  return `S${Math.ceil(day / 7)}`;
+}
+
+function calcDuration(start, end) {
+  if (!start || !end) return "";
+  const [h1, m1] = start.split(":").map(Number);
+  const [h2, m2] = end.split(":").map(Number);
+  const diff = (h2 * 60 + m2) - (h1 * 60 + m1);
+  if (diff <= 0) return "";
+  const hh = Math.floor(diff / 60);
+  const mm = diff % 60;
+  return hh > 0 ? `${hh}h ${mm}m` : `${mm}m`;
+}
+
+function calcDurationMinutes(start, end) {
+  if (!start || !end) return 0;
+  const [h1, m1] = start.split(":").map(Number);
+  const [h2, m2] = end.split(":").map(Number);
+  return (h2 * 60 + m2) - (h1 * 60 + m1);
+}
+
+// Generar opciones de hora cada 1 min de 00:00 a 23:59
+function generateTimeOptions() {
+  const opts = [];
+  for (let h = 0; h < 24; h++) {
+    for (let m = 0; m < 60; m++) {
+      opts.push(
+        `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`
+      );
+    }
+  }
+  return opts;
+}
+const TIME_OPTIONS = generateTimeOptions();
+
+// Calcular DD%
+function calcDDPercent(ddPuntos, puntosSl) {
+  const dd = parseFloat(ddPuntos) || 0;
+  const sl = parseFloat(puntosSl) || 0;
+  if (sl === 0) return 0;
+  return ((dd / sl) * 100).toFixed(2);
+}
+
+// ── Días del mes para calendario ────────────────────────────
+function getDaysInMonth(year, month) {
+  return new Date(year, month + 1, 0).getDate();
+}
+
+function getFirstDayOfWeek(year, month) {
+  // 0=domingo -> lo mapeamos a lunes=0
+  const d = new Date(year, month, 1).getDay();
+  return d === 0 ? 6 : d - 1;
+}
+
+// ── Funciones de estadísticas ───────────────────────────────
+
+function calcStats(trades) {
+  if (!trades || trades.length === 0) {
+    return {
+      total: 0, wins: 0, losses: 0, bes: 0,
+      winRate: 0, profitFactor: 0, expectancyR: 0, expectancy$: 0,
+      sharpe: 0, recoveryFactor: 0, payoff: 0, maxDD: 0, ddPercent: 0,
+      sampleSize: 0, maxWinStreak: 0, maxLossStreak: 0,
+      avgDurationWin: 0, avgDurationSL: 0, avgDurationBE: 0,
+      totalR: 0, totalPnL: 0,
+    };
+  }
+
+  const wins   = trades.filter((t) => t.resultado === "WIN");
+  const losses = trades.filter((t) => t.resultado === "SL");
+  const bes    = trades.filter((t) => t.resultado === "BE");
+
+  const total = trades.length;
+  const winRate = total > 0 ? (wins.length / total) * 100 : 0;
+
+  // R & P&L
+  const rValues = trades.map((t) => {
+    if (t.resultado === "SL") return -1;
+    if (t.resultado === "BE") return 0;
+    return parseFloat(t.rResultado) || 0;
+  });
+  const totalR   = rValues.reduce((a, b) => a + b, 0);
+  const totalPnL = totalR * R_VALUE;
+
+  const grossWinR  = rValues.filter((r) => r > 0).reduce((a, b) => a + b, 0);
+  const grossLossR = Math.abs(rValues.filter((r) => r < 0).reduce((a, b) => a + b, 0));
+
+  const profitFactor = grossLossR > 0 ? grossWinR / grossLossR : grossWinR > 0 ? Infinity : 0;
+
+  // Expectancy
+  const expectancyR = total > 0 ? totalR / total : 0;
+  const expectancy$ = expectancyR * R_VALUE;
+
+  // Sharpe (simplificado: media / stddev de R)
+  const meanR = total > 0 ? totalR / total : 0;
+  const variance =
+    total > 1
+      ? rValues.reduce((sum, r) => sum + (r - meanR) ** 2, 0) / (total - 1)
+      : 0;
+  const stdR = Math.sqrt(variance);
+  const sharpe = stdR > 0 ? meanR / stdR : 0;
+
+  // Max Drawdown (en R)
+  let peak = 0;
+  let cumR = 0;
+  let maxDD = 0;
+  for (const r of rValues) {
+    cumR += r;
+    if (cumR > peak) peak = cumR;
+    const dd = peak - cumR;
+    if (dd > maxDD) maxDD = dd;
+  }
+  const ddPercent = peak > 0 ? (maxDD / peak) * 100 : 0;
+
+  // Recovery Factor
+  const recoveryFactor = maxDD > 0 ? totalR / maxDD : totalR > 0 ? Infinity : 0;
+
+  // Payoff Ratio
+  const avgWinR  = wins.length > 0
+    ? wins.reduce((s, t) => s + (parseFloat(t.rResultado) || 0), 0) / wins.length
+    : 0;
+  const avgLossR = losses.length > 0 ? 1 : 0; // SL siempre -1R
+  const payoff = avgLossR > 0 ? avgWinR / avgLossR : 0;
+
+  // Rachas
+  let maxWinStreak = 0, maxLossStreak = 0, ws = 0, ls = 0;
+  for (const t of trades) {
+    if (t.resultado === "WIN") { ws++; ls = 0; }
+    else if (t.resultado === "SL") { ls++; ws = 0; }
+    else { ws = 0; ls = 0; }
+    if (ws > maxWinStreak) maxWinStreak = ws;
+    if (ls > maxLossStreak) maxLossStreak = ls;
+  }
+
+  // Duración promedio por resultado
+  function avgDur(arr) {
+    const durs = arr
+      .map((t) => calcDurationMinutes(t.horaInicio, t.horaFinal))
+      .filter((d) => d > 0);
+    return durs.length > 0 ? durs.reduce((a, b) => a + b, 0) / durs.length : 0;
+  }
+
+  return {
+    total,
+    wins: wins.length,
+    losses: losses.length,
+    bes: bes.length,
+    winRate,
+    profitFactor,
+    expectancyR,
+    expectancy$,
+    sharpe,
+    recoveryFactor,
+    payoff,
+    maxDD,
+    ddPercent,
+    sampleSize: total,
+    maxWinStreak,
+    maxLossStreak,
+    avgDurationWin: avgDur(wins),
+    avgDurationSL:  avgDur(losses),
+    avgDurationBE:  avgDur(bes),
+    totalR,
+    totalPnL,
+  };
+}
+
+// Equity curve data  [{ idx, cumR, cumPnL }]
+function buildEquityCurve(trades) {
+  let cum = 0;
+  return trades.map((t, i) => {
+    const r =
+      t.resultado === "SL" ? -1 : t.resultado === "BE" ? 0 : parseFloat(t.rResultado) || 0;
+    cum += r;
+    return { idx: i + 1, cumR: cum, cumPnL: cum * R_VALUE, fecha: t.fecha };
+  });
+}
+
+// P&L por día  { "YYYY-MM-DD": totalPnL }
+function pnlByDay(trades) {
+  const map = {};
+  for (const t of trades) {
+    const r =
+      t.resultado === "SL" ? -1 : t.resultado === "BE" ? 0 : parseFloat(t.rResultado) || 0;
+    map[t.fecha] = (map[t.fecha] || 0) + r * R_VALUE;
+  }
+  return map;
+}
+
+// P&L por semana del mes  { "S1": totalPnL, ... }
+function pnlByWeek(trades) {
+  const map = {};
+  for (const t of trades) {
+    const w = weekOfMonth(t.fecha);
+    const r =
+      t.resultado === "SL" ? -1 : t.resultado === "BE" ? 0 : parseFloat(t.rResultado) || 0;
+    map[w] = (map[w] || 0) + r * R_VALUE;
+  }
+  return map;
+}
+
+// Donut data  [{ label, value, color }]
+function donutData(stats) {
+  return [
+    { label: "WIN", value: stats.wins,   color: "#22c55e" },
+    { label: "SL",  value: stats.losses, color: "#ef4444" },
+    { label: "BE",  value: stats.bes,    color: "#facc15" },
+  ];
+}
+
+// Stats por setup
+function statsBySetup(trades) {
+  const map = {};
+  for (const s of SETUPS) {
+    const sub = trades.filter((t) => t.setup === s);
+    map[s] = calcStats(sub);
+  }
+  return map;
+}
+
+// Stats por bloque de hora (cada 5 min)
+function statsByHourBlock(trades) {
+  const map = {};
+  for (const t of trades) {
+    if (!t.horaInicio) continue;
+    const [h, m] = t.horaInicio.split(":").map(Number);
+    const block = `${String(h).padStart(2, "0")}:${String(Math.floor(m / 5) * 5).padStart(2, "0")}`;
+    if (!map[block]) map[block] = [];
+    map[block].push(t);
+  }
+  const result = {};
+  for (const [block, arr] of Object.entries(map)) {
+    result[block] = calcStats(arr);
+  }
+  return result;
+}
+
+// Stats por ATR range
+function statsByATR(trades) {
+  const ranges = [
+    { label: "0-20",  min: 0,  max: 20 },
+    { label: "20-40", min: 20, max: 40 },
+    { label: "40-60", min: 40, max: 60 },
+    { label: "60-80", min: 60, max: 80 },
+    { label: "80+",   min: 80, max: Infinity },
+  ];
+  const result = {};
+  for (const r of ranges) {
+    const sub = trades.filter((t) => {
+      const a = parseFloat(t.atr) || 0;
+      return a >= r.min && a < r.max;
+    });
+    if (sub.length > 0) result[r.label] = calcStats(sub);
+  }
+  return result;
+}
+
+// Stats por SL pts range
+function statsBySLPts(trades) {
+  const ranges = [
+    { label: "0-5",   min: 0,  max: 5 },
+    { label: "5-10",  min: 5,  max: 10 },
+    { label: "10-15", min: 10, max: 15 },
+    { label: "15-20", min: 15, max: 20 },
+    { label: "20+",   min: 20, max: Infinity },
+  ];
+  const result = {};
+  for (const r of ranges) {
+    const sub = trades.filter((t) => {
+      const sl = parseFloat(t.puntosSl) || 0;
+      return sl >= r.min && sl < r.max;
+    });
+    if (sub.length > 0) result[r.label] = calcStats(sub);
+  }
+  return result;
+}
+
+// Stats por dirección
+function statsByDirection(trades) {
+  const result = {};
+  for (const d of DIRECCIONES) {
+    const sub = trades.filter((t) => t.direccionDia === d);
+    if (sub.length > 0) result[d] = calcStats(sub);
+  }
+  return result;
+}
+
+// R tomado vs R máximo distribution
+function rTakenVsMax(trades) {
+  return trades
+    .filter((t) => t.resultado === "WIN" && t.rResultado && t.rMaximo)
+    .map((t) => ({
+      taken: parseFloat(t.rResultado) || 0,
+      max:   parseFloat(t.rMaximo) || 0,
+      fecha: t.fecha,
+      setup: t.setup,
+    }));
+}
+
+// % de movimiento capturado
+function capturePercent(trades) {
+  const data = rTakenVsMax(trades);
+  if (data.length === 0) return 0;
+  const pcts = data.map((d) => (d.max > 0 ? (d.taken / d.max) * 100 : 0));
+  return pcts.reduce((a, b) => a + b, 0) / pcts.length;
+}
+
+// ── Tips automáticos ────────────────────────────────────────
+function generateTips(trades) {
+  if (trades.length < 5) return ["Necesitas al menos 5 trades para generar tips."];
+
+  const tips = [];
+  const s = calcStats(trades);
+  const byHour = statsByHourBlock(trades);
+  const bySetup = statsBySetup(trades);
+  const capture = capturePercent(trades);
+
+  // Mejor / peor hora
+  const hourEntries = Object.entries(byHour).filter(([, st]) => st.total >= 3);
+  if (hourEntries.length > 0) {
+    const best = hourEntries.reduce((a, b) => (a[1].winRate > b[1].winRate ? a : b));
+    const worst = hourEntries.reduce((a, b) => (a[1].winRate < b[1].winRate ? a : b));
+    tips.push(`🎯 Mejor hora: ${best[0]} (WR ${best[1].winRate.toFixed(1)}%, ${best[1].total} trades)`);
+    tips.push(`⚠️ Peor hora: ${worst[0]} (WR ${worst[1].winRate.toFixed(1)}%, ${worst[1].total} trades)`);
+  }
+
+  // Mejor setup
+  const setupEntries = Object.entries(bySetup).filter(([, st]) => st.total >= 3);
+  if (setupEntries.length > 0) {
+    const bestSetup = setupEntries.reduce((a, b) =>
+      a[1].expectancyR > b[1].expectancyR ? a : b
+    );
+    tips.push(
+      `📊 Mejor setup: ${bestSetup[0]} (Exp ${bestSetup[1].expectancyR.toFixed(2)}R, WR ${bestSetup[1].winRate.toFixed(1)}%)`
+    );
+  }
+
+  // Capture %
+  tips.push(`📈 Capturas promedio: ${capture.toFixed(1)}% del movimiento máximo`);
+
+  // Rachas
+  tips.push(`🔥 Racha WIN máx: ${s.maxWinStreak} | Racha SL máx: ${s.maxLossStreak}`);
+
+  // Sharpe
+  if (s.sharpe > 0) tips.push(`📉 Sharpe Ratio: ${s.sharpe.toFixed(2)}`);
+
+  // Recovery
+  if (s.recoveryFactor !== Infinity && s.recoveryFactor > 0)
+    tips.push(`🔄 Recovery Factor: ${s.recoveryFactor.toFixed(2)}`);
+
+  // Payoff
+  if (s.payoff > 0) tips.push(`💰 Payoff Ratio: ${s.payoff.toFixed(2)}`);
+
+  // Sample size
+  if (s.total < 30) tips.push(`⚡ Sample size: ${s.total} — necesitas al menos 30 trades para resultados confiables`);
+
+  // ATR óptimo
+  const byATR = statsByATR(trades);
+  const atrEntries = Object.entries(byATR).filter(([, st]) => st.total >= 3);
+  if (atrEntries.length > 0) {
+    const bestATR = atrEntries.reduce((a, b) => (a[1].expectancyR > b[1].expectancyR ? a : b));
+    tips.push(`📏 ATR óptimo: ${bestATR[0]} (Exp ${bestATR[1].expectancyR.toFixed(2)}R)`);
+  }
+
+  // SL óptimo
+  const bySL = statsBySLPts(trades);
+  const slEntries = Object.entries(bySL).filter(([, st]) => st.total >= 3);
+  if (slEntries.length > 0) {
+    const bestSL = slEntries.reduce((a, b) => (a[1].expectancyR > b[1].expectancyR ? a : b));
+    tips.push(`🎯 SL óptimo: ${bestSL[0]} pts (Exp ${bestSL[1].expectancyR.toFixed(2)}R)`);
+  }
+
+  return tips;
+}
+
+// ── Parser CSV NinjaTrader 8 ────────────────────────────────
+//
+// El CSV tiene columnas:
+// Instrument, Action, Quantity, Price, Time, ID, E/X, Position, Order ID, Name, Commission, Rate, Account, Connection
+//
+// E/X = "Entry" o "Exit"
+// Hay que agrupar por trade: un Entry seguido de uno o más Exits hasta que Position = "-" o "0" o cambia de dirección
+// Parciales se juntan.
+
+function parseNT8CSV(csvText) {
+  const lines = csvText.trim().split("\n");
+  if (lines.length < 2) return [];
+
+  // Parse header
+  const header = lines[0].split(",").map((h) => h.trim());
+  const rows = [];
+  for (let i = 1; i < lines.length; i++) {
+    const vals = lines[i].split(",").map((v) => v.trim());
+    if (vals.length < header.length - 1) continue; // skip empty lines
+    const row = {};
+    header.forEach((h, idx) => {
+      row[h] = vals[idx] || "";
+    });
+    rows.push(row);
+  }
+
+  if (rows.length === 0) return [];
+
+  // Group into trades: each Entry starts a new trade, collect Exits until position closes
+  const trades = [];
+  let currentTrade = null;
+
+  for (const row of rows) {
+    const ex = (row["E/X"] || "").trim();
+    const action = (row["Action"] || "").trim(); // Buy or Sell
+    const qty = parseInt(row["Quantity"]) || 0;
+    const price = parseFloat(row["Price"]) || 0;
+    const time = (row["Time"] || "").trim();
+    const account = (row["Account"] || "").trim();
+    const position = (row["Position"] || "").trim();
+
+    if (ex === "Entry") {
+      // Close previous trade if still open
+      if (currentTrade && currentTrade.exits.length > 0) {
+        trades.push(currentTrade);
+      }
+      currentTrade = {
+        action,        // Buy or Sell (direction of entry)
+        entryQty: qty,
+        entryPrice: price,
+        entryTime: time,
+        account,
+        exits: [],
+      };
+    } else if (ex === "Exit" && currentTrade) {
+      currentTrade.exits.push({ action, qty, price, time });
+      // If position is "-" or "0", trade is fully closed
+      const posNum = parseInt(position);
+      if (position === "-" || position === "" || posNum === 0 || isNaN(posNum)) {
+        trades.push(currentTrade);
+        currentTrade = null;
+      }
+    }
+  }
+  // Push last trade if still open
+  if (currentTrade && currentTrade.exits.length > 0) {
+    trades.push(currentTrade);
+  }
+
+  // Convert grouped trades to our trade format
+  return trades.map((t) => {
+    const entryDir = t.action; // "Buy" = long, "Sell" = short
+    const isLong = entryDir === "Buy";
+
+    // Calculate P&L in points per contract, then total
+    let totalPnLPoints = 0;
+    let lastExitTime = t.entryTime;
+
+    for (const exit of t.exits) {
+      const diff = isLong
+        ? exit.price - t.entryPrice
+        : t.entryPrice - exit.price;
+      totalPnLPoints += diff * exit.qty;
+      lastExitTime = exit.time;
+    }
+
+    // MNQ = $0.50 per tick (0.25 point), so $2 per point per contract
+    // But totalPnLPoints already has qty factored in as points * qty
+    // Actually: PnL per contract = diff in points * $2/point for MNQ
+    // totalPnLPoints is already (priceExit - priceEntry) * qty summed
+    // For MNQ: 1 point = $2, but we've multiplied by qty already
+    // So total $ = totalPnLPoints * $2 for MNQ
+    // We store R = totalPnL$ / R_VALUE
+
+    // MNQ point value = $2 per point per contract
+    // NQ point value = $20 per point per contract
+    const pointValue = 2; // MNQ — adjust if needed
+    const totalPnL$ = totalPnLPoints * pointValue;
+    const rResult = totalPnL$ / R_VALUE;
+
+    // Parse dates
+    const entryDate = parseNT8DateTime(t.entryTime);
+    const exitDate  = parseNT8DateTime(lastExitTime);
+
+    // Determine resultado
+    let resultado = "WIN";
+    if (rResult < -0.5) resultado = "SL";
+    else if (Math.abs(rResult) <= 0.1) resultado = "BE";
+
+    // Extract parent account: "BX-M75953071852!Bulenox!Bulenox" -> parent = "Bulenox"
+    const accountParts = t.account.split("!");
+    const parentAccount = accountParts.length > 1 ? accountParts[1] : t.account;
+
+    return {
+      fecha:       entryDate.date,
+      horaInicio:  entryDate.time,
+      horaFinal:   exitDate.time,
+      duracionTrade: calcDuration(entryDate.time, exitDate.time),
+      buySell:     isLong ? "BUY" : "SELL",
+      resultado,
+      rResultado:  resultado === "WIN" ? Math.abs(rResult).toFixed(2) : resultado === "SL" ? "" : "",
+      rMaximo:     "", // No disponible en CSV
+      puntosSl:    "", // No disponible en CSV
+      atr:         "",
+      setup:       "",
+      contexto:    "",
+      breakRangoM30: "",
+      direccionDia:  "",
+      ddPuntos:      "",
+      hayNoticia:    "NO",
+      noticiaHora:   "",
+      noticiaImpacto: "",
+      noticiaTipo:   "",
+      m5:  "",
+      m15: "",
+      m30: "",
+      screenshot: "",
+      notas: `Importado NT8 | P&L: $${totalPnL$.toFixed(2)} | ${t.entryQty} contratos`,
+      mode:    MODES.JOURNAL,
+      account: t.account,
+      parentAccount,
+      _pnlDollars: totalPnL$, // internal, not saved
+      _rCalc: rResult,         // internal, for display
+    };
+  });
+}
+
+function parseNT8DateTime(str) {
+  // "4/2/2026 9:36:35 AM"  ->  { date: "2026-04-02", time: "09:36" }
+  if (!str) return { date: "", time: "" };
+  try {
+    const [datePart, timePart, ampm] = str.split(" ");
+    const [month, day, year] = datePart.split("/").map(Number);
+    let [hour, min] = timePart.split(":").map(Number);
+
+    if (ampm && ampm.toUpperCase() === "PM" && hour < 12) hour += 12;
+    if (ampm && ampm.toUpperCase() === "AM" && hour === 12) hour = 0;
+
+    return {
+      date: isoFromParts(day, month, year),
+      time: `${String(hour).padStart(2, "0")}:${String(min).padStart(2, "0")}`,
+    };
+  } catch {
+    return { date: "", time: "" };
+  }
+}
+
+// ── CRUD Supabase ───────────────────────────────────────────
+
+async function fetchTrades(userId, mode) {
+  const { data, error } = await supabase
+    .from("trades")
+    .select("*")
+    .eq("user_id", userId)
+    .eq("mode", mode)
+    .order("fecha", { ascending: false })
+    .order("hora_inicio", { ascending: false });
+
+  if (error) { console.error("fetchTrades:", error); return []; }
+  return (data || []).map(dbToTrade);
+}
+
+async function insertTrade(trade, userId, mode) {
+  const row = tradeToDb({ ...trade, user_id: userId, mode });
+  delete row.id;
+  delete row._pnlDollars;
+  delete row._rCalc;
+  const { data, error } = await supabase.from("trades").insert([row]).select();
+  if (error) { console.error("insertTrade:", error); return null; }
+  return data?.[0] ? dbToTrade(data[0]) : null;
+}
+
+async function updateTrade(id, trade) {
+  const row = tradeToDb(trade);
+  delete row.id;
+  delete row.user_id;
+  delete row.mode;
+  delete row._pnlDollars;
+  delete row._rCalc;
+  const { data, error } = await supabase.from("trades").update(row).eq("id", id).select();
+  if (error) { console.error("updateTrade:", error); return null; }
+  return data?.[0] ? dbToTrade(data[0]) : null;
+}
+
+async function deleteTrade(id) {
+  const { error } = await supabase.from("trades").delete().eq("id", id);
+  if (error) console.error("deleteTrade:", error);
+  return !error;
+}
+
+async function insertMultipleTrades(trades, userId, mode) {
+  const rows = trades.map((t) => {
+    const row = tradeToDb({ ...t, user_id: userId, mode });
+    delete row.id;
+    delete row._pnlDollars;
+    delete row._rCalc;
+    return row;
+  });
+  const { data, error } = await supabase.from("trades").insert(rows).select();
+  if (error) { console.error("insertMultiple:", error); return []; }
+  return (data || []).map(dbToTrade);
+}
+
+// ── Auth helpers ────────────────────────────────────────────
+
+async function loginUser(username, password) {
+  const { data, error } = await supabase
+    .from("users")
+    .select("*")
+    .eq("username", username)
+    .eq("password", password)
+    .single();
+  if (error || !data) return null;
+  return { id: data.id, username: data.username };
+}
+
+async function registerUser(username, password) {
+  const { data, error } = await supabase
+    .from("users")
+    .insert([{ username, password }])
+    .select()
+    .single();
+  if (error) return { error: error.message };
+  return { user: { id: data.id, username: data.username } };
+}
+
+// ── Colores y estilos base ──────────────────────────────────
+const COLORS = {
+  bg:        "#0f0f13",
+  card:      "#1a1a24",
+  cardHover: "#22222e",
+  border:    "#2a2a3a",
+  text:      "#e4e4e7",
+  textDim:   "#71717a",
+  accent:    "#6366f1", // indigo
+  accentBT:  "#6366f1",
+  accentJournal: "#f59e0b", // amber for journal mode
+  green:     "#22c55e",
+  red:       "#ef4444",
+  yellow:    "#facc15",
+  white:     "#ffffff",
+};
+
+/* ============================================================
+   FIN PARTE 1 — Constantes, Helpers, Stats, Parser NT8, CRUD
+   La Parte 2 contendrá los componentes de UI (Login, Sidebar,
+   Dashboard, Calendario, etc.)
+   ============================================================ */
