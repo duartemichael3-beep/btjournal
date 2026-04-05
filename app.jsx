@@ -872,6 +872,241 @@ function NT8Modal({ onImport, onClose }) {
 }
 
 // ═══════════════════════════════════════════════
+// SHARE CARD MODAL — generates PNG card for WhatsApp/IG
+// ═══════════════════════════════════════════════
+const DIAS_ES = ["Domingo", "Lunes", "Martes", "Miercoles", "Jueves", "Viernes", "Sabado"]
+const MESES_ES = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"]
+const MESES_SHORT = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"]
+
+function formatCardDate(fd1, fd2) {
+  if (!fd1 && !fd2) return ""
+  const d1 = fd1 ? new Date(fd1 + "T12:00:00") : null
+  const d2 = fd2 ? new Date(fd2 + "T12:00:00") : null
+  if (d1 && d2 && fd1 === fd2) {
+    // Single day: Vie 15 Ago 2025
+    return `${DIAS_ES[d1.getDay()].slice(0, 3)} ${d1.getDate()} ${MESES_SHORT[d1.getMonth()]} ${d1.getFullYear()}`
+  }
+  if (d1 && d2 && d1.getMonth() === d2.getMonth() && d1.getFullYear() === d2.getFullYear() && d2.getDate() - d1.getDate() <= 6) {
+    // Same week: Sem 11-15 Ago
+    return `Sem ${d1.getDate()}-${d2.getDate()} ${MESES_SHORT[d1.getMonth()]}`
+  }
+  if (d1 && d2 && d1.getDate() === 1 && d2.getDate() === new Date(d2.getFullYear(), d2.getMonth() + 1, 0).getDate() && d1.getMonth() === d2.getMonth()) {
+    // Full month: Noviembre 2025
+    return `${MESES_ES[d1.getMonth()]} ${d1.getFullYear()}`
+  }
+  if (d1 && d2) {
+    // Range: 15 Ago → 20 Nov 2025
+    const sameYear = d1.getFullYear() === d2.getFullYear()
+    return `${d1.getDate()} ${MESES_SHORT[d1.getMonth()]}${sameYear ? "" : " " + d1.getFullYear()} → ${d2.getDate()} ${MESES_SHORT[d2.getMonth()]} ${d2.getFullYear()}`
+  }
+  if (d1) return `Desde ${d1.getDate()} ${MESES_SHORT[d1.getMonth()]} ${d1.getFullYear()}`
+  if (d2) return `Hasta ${d2.getDate()} ${MESES_SHORT[d2.getMonth()]} ${d2.getFullYear()}`
+  return ""
+}
+
+function ShareCardModal({ stats, modeLabel, instagram, fd1, fd2, onClose }) {
+  const canvasRef = useRef()
+  const [igInput, setIgInput] = useState(instagram || "")
+  const [cardFd1, setCardFd1] = useState(fd1 || "")
+  const [cardFd2, setCardFd2] = useState(fd2 || "")
+  const dateLabel = formatCardDate(cardFd1, cardFd2) || "Historico"
+
+  const drawCard = () => {
+    const canvas = canvasRef.current
+    if (!canvas) return
+    const ctx = canvas.getContext("2d")
+    const W = 720, H = 920
+    canvas.width = W; canvas.height = H
+
+    // Background
+    ctx.fillStyle = "#0a0e14"
+    ctx.fillRect(0, 0, W, H)
+
+    // Border
+    ctx.strokeStyle = "#1e2738"
+    ctx.lineWidth = 2
+    ctx.strokeRect(1, 1, W - 2, H - 2)
+
+    // Header
+    ctx.fillStyle = "#4c9aff"
+    ctx.font = "bold 22px 'JetBrains Mono', monospace"
+    ctx.fillText("MY JOURNAL PRO", 32, 44)
+
+    ctx.fillStyle = "#8892a4"
+    ctx.font = "13px 'JetBrains Mono', monospace"
+    ctx.textAlign = "right"
+    ctx.fillText(modeLabel, W - 32, 44)
+    ctx.textAlign = "left"
+
+    // Date line
+    ctx.fillStyle = "#5a6478"
+    ctx.font = "14px 'DM Sans', sans-serif"
+    ctx.fillText(dateLabel, 32, 72)
+
+    // Separator
+    ctx.strokeStyle = "#1e2738"
+    ctx.beginPath(); ctx.moveTo(32, 88); ctx.lineTo(W - 32, 88); ctx.stroke()
+
+    // Title
+    ctx.fillStyle = "#d4dae4"
+    ctx.font = "bold 16px 'JetBrains Mono', monospace"
+    ctx.textAlign = "center"
+    ctx.fillText("PERFORMANCE STATS", W / 2, 118)
+    ctx.textAlign = "left"
+
+    // Separator
+    ctx.beginPath(); ctx.moveTo(32, 132); ctx.lineTo(W - 32, 132); ctx.stroke()
+
+    // Metrics row 1
+    const s = stats
+    const drawMetric = (x, y, label, value, color) => {
+      ctx.fillStyle = "#5a6478"
+      ctx.font = "bold 10px 'JetBrains Mono', monospace"
+      ctx.fillText(label, x, y)
+      ctx.fillStyle = color || "#d4dae4"
+      ctx.font = "bold 28px 'JetBrains Mono', monospace"
+      ctx.fillText(value, x, y + 32)
+    }
+
+    const drawMetricSm = (x, y, label, value, color) => {
+      ctx.fillStyle = "#5a6478"
+      ctx.font = "bold 10px 'JetBrains Mono', monospace"
+      ctx.fillText(label, x, y)
+      ctx.fillStyle = color || "#d4dae4"
+      ctx.font = "bold 22px 'JetBrains Mono', monospace"
+      ctx.fillText(value, x, y + 28)
+    }
+
+    const pnlColor = s.totalR >= 0 ? "#00d68f" : "#ff4757"
+    const wrColor = s.winRate >= 50 ? "#00d68f" : "#ff4757"
+    const pfColor = s.profitFactor >= 1.5 ? "#00d68f" : s.profitFactor >= 1 ? "#ffc048" : "#ff4757"
+
+    drawMetric(32, 160, "P&L", `${s.totalR >= 0 ? "+" : ""}${s.totalR}R`, pnlColor)
+    drawMetric(260, 160, "WIN%", `${s.winRate.toFixed(2)}%`, wrColor)
+    drawMetric(500, 160, "PF", fmtPF(s.profitFactor), pfColor)
+
+    // Sub value for P&L
+    ctx.fillStyle = "#5a6478"
+    ctx.font = "14px 'JetBrains Mono', monospace"
+    ctx.fillText(fmt$(s.totalDollar), 32, 208)
+
+    drawMetricSm(32, 240, "EXPECTANCY", `${s.expectancy}R`, s.expectancy > 0 ? "#00d68f" : "#ff4757")
+    drawMetricSm(260, 240, "SHARPE", s.sharpeRatio.toFixed(2), s.sharpeRatio >= 1 ? "#00d68f" : s.sharpeRatio >= 0.5 ? "#ffc048" : "#ff4757")
+    drawMetricSm(500, 240, "TRADES", String(s.total), "#d4dae4")
+
+    // Win/SL/BE bars
+    const barY = 310
+    const barW = W - 64
+    const barH = 24
+    const winPct = s.total ? s.wins / s.total : 0
+    const slPct = s.total ? s.losses / s.total : 0
+    const bePct = s.total ? s.bes / s.total : 0
+
+    // Background
+    ctx.fillStyle = "#1a2030"
+    ctx.fillRect(32, barY, barW, barH); ctx.fillRect(32, barY + 36, barW, barH); ctx.fillRect(32, barY + 72, barW, barH)
+
+    // Bars
+    ctx.fillStyle = "#00d68f"; ctx.fillRect(32, barY, barW * winPct, barH)
+    ctx.fillStyle = "#ff4757"; ctx.fillRect(32, barY + 36, barW * slPct, barH)
+    ctx.fillStyle = "#ffc048"; ctx.fillRect(32, barY + 72, barW * bePct, barH)
+
+    // Labels
+    ctx.font = "bold 11px 'JetBrains Mono', monospace"
+    ctx.fillStyle = "#d4dae4"
+    ctx.fillText(`WIN ${(winPct * 100).toFixed(1)}% (${s.wins})`, 40, barY + 16)
+    ctx.fillText(`SL ${(slPct * 100).toFixed(1)}% (${s.losses})`, 40, barY + 52)
+    ctx.fillText(`BE ${(bePct * 100).toFixed(1)}% (${s.bes})`, 40, barY + 88)
+
+    // Separator
+    const secY = barY + 112
+    ctx.strokeStyle = "#1e2738"
+    ctx.beginPath(); ctx.moveTo(32, secY); ctx.lineTo(W - 32, secY); ctx.stroke()
+
+    // Bottom stats
+    const bsY = secY + 28
+    ctx.fillStyle = "#5a6478"; ctx.font = "bold 10px 'JetBrains Mono', monospace"
+    ctx.fillText("RACHA WIN", 32, bsY)
+    ctx.fillText("MEJOR TRADE", 260, bsY)
+    ctx.fillText("PAYOFF", 500, bsY)
+
+    ctx.font = "bold 20px 'JetBrains Mono', monospace"
+    ctx.fillStyle = "#00d68f"; ctx.fillText(String(s.maxWinStreak), 32, bsY + 26)
+    ctx.fillStyle = "#00d68f"; ctx.fillText(`+${s.bestR}R`, 260, bsY + 26)
+    ctx.fillStyle = s.payoffRatio >= 2 ? "#00d68f" : "#ffc048"; ctx.fillText(s.payoffRatio === Infinity ? "∞" : s.payoffRatio.toFixed(2), 500, bsY + 26)
+
+    ctx.fillStyle = "#5a6478"; ctx.font = "bold 10px 'JetBrains Mono', monospace"
+    ctx.fillText("RACHA SL", 32, bsY + 56)
+    ctx.fillText("MAX DD", 260, bsY + 56)
+    ctx.fillText("RECOVERY", 500, bsY + 56)
+
+    ctx.font = "bold 20px 'JetBrains Mono', monospace"
+    ctx.fillStyle = "#ff4757"; ctx.fillText(String(s.maxLossStreak), 32, bsY + 82)
+    ctx.fillStyle = "#ff4757"; ctx.fillText(`${s.maxEquityDD}R`, 260, bsY + 82)
+    ctx.fillStyle = s.recoveryFactor >= 2 ? "#00d68f" : "#ffc048"; ctx.fillText(s.recoveryFactor === Infinity ? "∞" : s.recoveryFactor.toFixed(2), 500, bsY + 82)
+
+    // Instagram footer
+    if (igInput) {
+      ctx.strokeStyle = "#1e2738"
+      ctx.beginPath(); ctx.moveTo(32, H - 52); ctx.lineTo(W - 32, H - 52); ctx.stroke()
+      ctx.fillStyle = "#a78bfa"
+      ctx.font = "bold 16px 'DM Sans', sans-serif"
+      ctx.textAlign = "center"
+      ctx.fillText(igInput.startsWith("@") ? igInput : "@" + igInput, W / 2, H - 24)
+      ctx.textAlign = "left"
+    }
+  }
+
+  useEffect(() => { drawCard() }, [stats, igInput, cardFd1, cardFd2])
+
+  const download = () => {
+    const canvas = canvasRef.current
+    if (!canvas) return
+    const a = document.createElement("a")
+    a.download = `journal_${dateLabel.replace(/\s/g, "_") || "stats"}.png`
+    a.href = canvas.toDataURL("image/png")
+    a.click()
+  }
+
+  const share = async () => {
+    const canvas = canvasRef.current
+    if (!canvas) return
+    try {
+      const blob = await new Promise(r => canvas.toBlob(r, "image/png"))
+      if (navigator.share) {
+        await navigator.share({ files: [new File([blob], "journal_stats.png", { type: "image/png" })] })
+      } else download()
+    } catch { download() }
+  }
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.9)", zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }} onClick={onClose}>
+      <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 16, padding: 24, width: "100%", maxWidth: 500, maxHeight: "90vh", overflow: "auto" }} onClick={e => e.stopPropagation()}>
+        <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 14 }}>
+          <h2 style={{ fontSize: 18, fontWeight: 700, fontFamily: "var(--mono)" }}>Compartir Card</h2>
+          <button className="btn bo bx" onClick={onClose}>✕</button>
+        </div>
+        <div className="form-grid" style={{ marginBottom: 14 }}>
+          <DatePick value={cardFd1} onChange={setCardFd1} label="Desde" compact />
+          <DatePick value={cardFd2} onChange={setCardFd2} label="Hasta" compact />
+          <div className="field">
+            <label>Instagram</label>
+            <input className="inp" value={igInput} onChange={e => setIgInput(e.target.value)} placeholder="@tu_usuario" style={{ fontSize: 12 }} />
+          </div>
+        </div>
+        <div style={{ background: "#0a0e14", borderRadius: 8, padding: 8, marginBottom: 14, textAlign: "center" }}>
+          <canvas ref={canvasRef} style={{ width: "100%", maxWidth: 360, borderRadius: 4 }} />
+        </div>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button className="btn bp" onClick={download}>Descargar PNG</button>
+          <button className="btn bo" onClick={share}>Compartir</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ═══════════════════════════════════════════════
 // LOGIN SCREEN
 // ═══════════════════════════════════════════════
 function LoginScreen({ onLogin }) {
@@ -889,7 +1124,7 @@ function LoginScreen({ onLogin }) {
       const data = await res.json()
       if (!data.length) { setErr("No existe"); setLoading(false); return }
       if (data[0].password !== pass) { setErr("Incorrecta"); setLoading(false); return }
-      localStorage.setItem("btj_user", JSON.stringify({ id: data[0].id, username: data[0].username, role: data[0].role || "user" }))
+      localStorage.setItem("btj_user", JSON.stringify({ id: data[0].id, username: data[0].username, role: data[0].role || "user", instagram: data[0].instagram || "" }))
       onLogin(data[0])
     } catch { setErr("Error") }
     setLoading(false)
@@ -910,7 +1145,7 @@ function LoginScreen({ onLogin }) {
       const res = await supa("users", { method: "POST", body: JSON.stringify({ username: user, password: pass }) })
       const data = await res.json()
       if (data && data[0]) {
-        localStorage.setItem("btj_user", JSON.stringify({ id: data[0].id, username: data[0].username, role: data[0].role || "user" }))
+        localStorage.setItem("btj_user", JSON.stringify({ id: data[0].id, username: data[0].username, role: data[0].role || "user", instagram: data[0].instagram || "" }))
         onLogin(data[0])
       } else setErr("Error al crear")
     } catch { setErr("Error") }
@@ -922,8 +1157,8 @@ function LoginScreen({ onLogin }) {
   return (
     <div style={{ minHeight: "100vh", background: "var(--bg)", display: "flex", alignItems: "center", justifyContent: "center" }}>
       <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 16, padding: "40px 36px", width: 360, maxWidth: "90vw" }}>
-        <h1 style={{ fontSize: 24, fontWeight: 700, color: "var(--accent)", textAlign: "center", marginBottom: 4, fontFamily: "var(--mono)" }}>BT Journal</h1>
-        <p style={{ textAlign: "center", color: "var(--text3)", fontSize: 12, marginBottom: 28, fontFamily: "var(--mono)" }}>Trading Pro</p>
+        <h1 style={{ fontSize: 24, fontWeight: 700, color: "var(--accent)", textAlign: "center", marginBottom: 4, fontFamily: "var(--mono)" }}>My Journal Pro</h1>
+        <p style={{ textAlign: "center", color: "var(--text3)", fontSize: 12, marginBottom: 28, fontFamily: "var(--mono)" }}>Trading Journal</p>
         <div style={{ display: "flex", gap: 4, marginBottom: 20, background: "var(--bg)", borderRadius: 8, padding: 3 }}>
           <button onClick={() => { setMode("login"); setErr("") }} style={{ flex: 1, padding: 8, border: "none", borderRadius: 6, background: mode === "login" ? "var(--ad)" : "transparent", color: mode === "login" ? "var(--accent)" : "var(--text3)", fontWeight: 600, fontSize: 13, cursor: "pointer" }}>Entrar</button>
           <button onClick={() => { setMode("register"); setErr("") }} style={{ flex: 1, padding: 8, border: "none", borderRadius: 6, background: mode === "register" ? "var(--ad)" : "transparent", color: mode === "register" ? "var(--accent)" : "var(--text3)", fontWeight: 600, fontSize: 13, cursor: "pointer" }}>Registro</button>
@@ -963,6 +1198,9 @@ function MainApp({ user, onLogout }) {
   const [appMode, setAppMode] = useState("bt")
   const [showNT8, setShowNT8] = useState(false)
   const [dayModal, setDayModal] = useState(null)
+  const [showCard, setShowCard] = useState(false)
+  const [showLinkModal, setShowLinkModal] = useState(false)
+  const [publicLink, setPublicLink] = useState("")
   const fileRef = useRef()
 
   // Team state
@@ -1284,6 +1522,19 @@ function MainApp({ user, onLogout }) {
     finally { setSaving(false) }
   }
 
+  const generatePublicLink = async (shareType, shareFilter) => {
+    setSaving(true)
+    try {
+      const linkId = Date.now().toString(36) + Math.random().toString(36).slice(2, 8)
+      await supa("public_links", { method: "POST", body: JSON.stringify({ id: linkId, user_id: user.id, mode: appMode, share_type: shareType, share_filter: shareFilter }) })
+      const url = `${window.location.origin}${window.location.pathname}?pub=${linkId}`
+      setPublicLink(url)
+      try { await navigator.clipboard.writeText(url) } catch {}
+      alert("Link copiado al clipboard!")
+    } catch (e) { alert("Error: " + e.message) }
+    finally { setSaving(false) }
+  }
+
   const handleFile = e => {
     const f = e.target.files[0]; if (!f) return
     const r = new FileReader()
@@ -1454,6 +1705,8 @@ function MainApp({ user, onLogout }) {
       {viewSS && <div className="ss-modal" onClick={() => setViewSS(null)}><img src={viewSS} /></div>}
       {/* NT8 import modal */}
       {showNT8 && <NT8Modal onImport={handleNT8Import} onClose={() => setShowNT8(false)} />}
+      {/* Share card modal */}
+      {showCard && <ShareCardModal stats={stats} modeLabel={modeLabel} instagram={user.instagram || ""} fd1={fd1} fd2={fd2} onClose={() => setShowCard(false)} />}
       {/* Day detail modal */}
       {dayModal && <DayModal date={dayModal} trades={trades} onClose={() => setDayModal(null)} onViewSS={setViewSS} />}
       {/* Team day detail modal */}
@@ -1464,14 +1717,14 @@ function MainApp({ user, onLogout }) {
       {/* Mobile top bar */}
       <div className="mobile-bar">
         <button onClick={() => setSb(!sb)} style={{ background: "none", border: "none", color: "var(--text)", fontSize: 20, cursor: "pointer" }}>☰</button>
-        <span style={{ fontWeight: 700, color: accentColor, fontFamily: "var(--mono)", fontSize: 13 }}>BT JOURNAL</span>
+        <span style={{ fontWeight: 700, color: accentColor, fontFamily: "var(--mono)", fontSize: 13 }}>MY JOURNAL PRO</span>
         <div style={{ width: 28 }} />
       </div>
 
       {/* ── SIDEBAR ── */}
       <div className={`sidebar ${sb ? "open" : "closed"}`}>
         <div className="sb-brand">
-          <h1 style={{ color: accentColor }}>BT Journal</h1>
+          <h1 style={{ color: accentColor }}>My Journal Pro</h1>
           <p style={{ color: "var(--green)" }}>{user.username}</p>
         </div>
         {/* Mode toggle BT / Journal */}
@@ -1516,7 +1769,17 @@ function MainApp({ user, onLogout }) {
         <h1 className="pt">Dashboard <span style={{ fontSize: 16, fontFamily: "var(--mono)", color: accentColor, fontWeight: 600 }}>{modeLabel}</span></h1>
         <p className="ps">{rT(trades).length} trades | 1R={fmt$(RV)}</p>
       </div>
-      <Filters />
+      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "flex-start" }}>
+        <Filters />
+        <div style={{ display: "flex", gap: 4, marginTop: 14 }}>
+          <button className="btn bo bx" style={{ fontSize: 10 }} onClick={() => setShowCard(true)}>📱 Card</button>
+          <button className="btn bo bx" style={{ fontSize: 10 }} onClick={() => {
+            const sType = fd1 || fd2 ? "daterange" : "all"
+            const sFilter = fd1 || fd2 ? `${fd1}|${fd2}` : ""
+            generatePublicLink(sType, sFilter)
+          }}>🔗 Link</button>
+        </div>
+      </div>
     </div>
 
     {/* Metrics */}
@@ -2378,11 +2641,201 @@ input[type="date"]::-webkit-calendar-picker-indicator{filter:invert(.6)}
 .card,.mc{animation:fadeIn .3s ease both}
 `
 
+// ═══════════════════════════════════════════════
+// PUBLIC VIEW — read-only, isolated, no login links
+// ═══════════════════════════════════════════════
+function PublicView({ linkId }) {
+  const [data, setData] = useState(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState("")
+  const [viewSS, setViewSS] = useState(null)
+  const [dayModal, setDayModal] = useState(null)
+  const [pubCalM, setPubCalM] = useState(null)
+  const [pubCalY, setPubCalY] = useState(null)
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const lr = await supa(`public_links?id=eq.${encodeURIComponent(linkId)}&select=*`)
+        const ld = await lr.json()
+        if (!ld || !ld.length) { setError("Link no encontrado o expirado"); setLoading(false); return }
+        const link = ld[0]
+        // Check expiry
+        if (link.expires_at && new Date(link.expires_at) < new Date()) { setError("Link expirado"); setLoading(false); return }
+        // Get user info
+        const ur = await supa(`users?id=eq.${link.user_id}&select=username,instagram`)
+        const ud = await ur.json()
+        const username = ud && ud[0] ? ud[0].username : "?"
+        const instagram = ud && ud[0] ? ud[0].instagram || "" : ""
+        // Get trades
+        let query = `trades?user_id=eq.${link.user_id}&mode=eq.${link.mode}&select=*&order=created_at.desc`
+        const tr = await supa(query)
+        let trades = (await tr.json()).map(d2t)
+        // Apply filters
+        if (link.share_type === "daterange" && link.share_filter) {
+          const [d1, d2] = link.share_filter.split("|")
+          if (d1) trades = trades.filter(t => t.fecha >= d1)
+          if (d2) trades = trades.filter(t => t.fecha <= d2)
+        } else if (link.share_type === "month" && link.share_filter) {
+          trades = trades.filter(t => t.fecha && t.fecha.startsWith(link.share_filter))
+        } else if (link.share_type === "setup" && link.share_filter) {
+          trades = trades.filter(t => t.setup === link.share_filter)
+        }
+        // Auto-position calendar
+        const dates = trades.filter(t => t.fecha).map(t => new Date(t.fecha)).sort((a, b) => b - a)
+        if (dates.length) { setPubCalM(dates[0].getMonth()); setPubCalY(dates[0].getFullYear()) }
+        else { setPubCalM(new Date().getMonth()); setPubCalY(new Date().getFullYear()) }
+
+        setData({ trades, username, instagram, mode: link.mode, link })
+      } catch (e) { setError("Error cargando datos") }
+      finally { setLoading(false) }
+    })()
+  }, [linkId])
+
+  if (loading) return <div style={{ minHeight: "100vh", background: "#0a0e14", display: "flex", alignItems: "center", justifyContent: "center", color: "#4c9aff", fontFamily: "'JetBrains Mono', monospace" }}>Cargando...</div>
+  if (error) return <div style={{ minHeight: "100vh", background: "#0a0e14", display: "flex", alignItems: "center", justifyContent: "center", color: "#ff4757", fontFamily: "'JetBrains Mono', monospace" }}>{error}</div>
+  if (!data) return null
+
+  const { trades, username, instagram, mode } = data
+  const real = rT(trades)
+  const s = cS(real)
+  const ex = extraS(real)
+  const modeLabel = mode === "journal" ? "JOURNAL" : "BACKTESTING"
+  const accentColor = mode === "journal" ? "var(--purple)" : "var(--accent)"
+
+  // Calendar
+  const calBd = {}
+  if (pubCalM !== null && pubCalY !== null) {
+    trades.forEach(t => {
+      if (!t.fecha) return
+      const d = new Date(t.fecha)
+      if (d.getMonth() === pubCalM && d.getFullYear() === pubCalY) {
+        const day = d.getDate()
+        if (!calBd[day]) calBd[day] = []
+        calBd[day].push(t)
+      }
+    })
+  }
+  const dim = pubCalY !== null ? new Date(pubCalY, pubCalM + 1, 0).getDate() : 0
+  const fwd = pubCalY !== null ? new Date(pubCalY, pubCalM, 1).getDay() : 0
+  const mName = pubCalY !== null ? new Date(pubCalY, pubCalM).toLocaleString("es", { month: "long", year: "numeric" }) : ""
+  const cells = []; for (let i = 0; i < fwd; i++) cells.push(null); for (let d = 1; d <= dim; d++) cells.push(d)
+  const weeks = []; for (let i = 0; i < cells.length; i += 7) weeks.push(cells.slice(i, i + 7))
+  const makeDate = d => `${pubCalY}-${String(pubCalM + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`
+
+  return (
+    <div style={{ minHeight: "100vh", background: "var(--bg)", padding: "40px 20px" }}>
+      {viewSS && <div className="ss-modal" onClick={() => setViewSS(null)}><img src={viewSS} /></div>}
+      {dayModal && <DayModal date={dayModal} trades={trades} onClose={() => setDayModal(null)} onViewSS={setViewSS} />}
+      <div style={{ maxWidth: 900, margin: "0 auto" }}>
+        {/* Header */}
+        <div style={{ marginBottom: 24 }}>
+          <h1 style={{ fontSize: 28, fontWeight: 700, color: accentColor, fontFamily: "var(--mono)", letterSpacing: -0.5 }}>My Journal Pro</h1>
+          <p style={{ color: "var(--text3)", fontFamily: "var(--mono)", fontSize: 13, marginTop: 4 }}>{modeLabel} — {real.length} trades</p>
+        </div>
+
+        {/* Metrics */}
+        <div className="metrics">
+          <MC label="P&L" value={`${s.totalR >= 0 ? "+" : ""}${s.totalR}R`} sub={fmt$(s.totalDollar)} color={s.totalR >= 0 ? "var(--green)" : "var(--red)"} big />
+          <MC label="Win%" value={`${s.winRate.toFixed(2)}%`} color={s.winRate >= 50 ? "var(--green)" : "var(--red)"} sub={`${s.wins}W|${s.losses}L|${s.bes}BE`} />
+          <MC label="PF" value={fmtPF(s.profitFactor)} color={s.profitFactor >= 1.5 ? "var(--green)" : s.profitFactor >= 1 ? "var(--yellow)" : "var(--red)"} />
+          <MC label="Exp" value={`${s.expectancy}R`} color={s.expectancy > 0 ? "var(--green)" : "var(--red)"} sub={fmt$(s.expectDollar) + "/t"} />
+          <MC label="Sharpe" value={s.sharpeRatio.toFixed(2)} color={s.sharpeRatio >= 1 ? "var(--green)" : s.sharpeRatio >= 0.5 ? "var(--yellow)" : "var(--red)"} />
+          <MC label="Payoff" value={s.payoffRatio === Infinity ? "∞" : s.payoffRatio.toFixed(2)} color={s.payoffRatio >= 2 ? "var(--green)" : "var(--yellow)"} />
+        </div>
+
+        {/* Resumen */}
+        <div className="card">
+          <div className="st">Resumen</div>
+          <div className="info-grid">
+            <div className="info-item"><div className="ml">Dia + ganador</div><div className="val" style={{ color: "var(--green)" }}>{ex.bestDay}</div></div>
+            <div className="info-item"><div className="ml">Dia + perdedor</div><div className="val" style={{ color: "var(--red)" }}>{ex.worstDay}</div></div>
+            <div className="info-item"><div className="ml">Ops/dia</div><div className="val">{ex.avgOps}</div></div>
+            <div className="info-item"><div className="ml">Racha WIN</div><div className="val" style={{ color: "var(--green)" }}>{s.maxWinStreak}</div></div>
+            <div className="info-item"><div className="ml">Racha LOSS</div><div className="val" style={{ color: "var(--red)" }}>{s.maxLossStreak}</div></div>
+          </div>
+        </div>
+
+        {/* Equity */}
+        <div className="card"><div className="st">Equity</div><EC trades={real} /></div>
+
+        {/* Calendar */}
+        {pubCalM !== null && (
+          <div className="card" style={{ padding: 0, overflow: "hidden" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "14px 18px", borderBottom: "1px solid var(--border)" }}>
+              <span style={{ fontFamily: "var(--mono)", fontWeight: 700, fontSize: 15, textTransform: "capitalize" }}>{mName}</span>
+              <div style={{ display: "flex", gap: 6 }}>
+                <button className="btn bo bx" onClick={() => { if (pubCalM === 0) { setPubCalM(11); setPubCalY(pubCalY - 1) } else setPubCalM(pubCalM - 1) }}>&lt;</button>
+                <button className="btn bo bx" onClick={() => { if (pubCalM === 11) { setPubCalM(0); setPubCalY(pubCalY + 1) } else setPubCalM(pubCalM + 1) }}>&gt;</button>
+              </div>
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(7,1fr)", fontSize: 10, fontFamily: "var(--mono)" }}>
+              {["Do", "Lu", "Ma", "Mi", "Ju", "Vi", "Sa"].map(d => (
+                <div key={d} style={{ padding: "6px 3px", textAlign: "center", color: "var(--text3)", borderBottom: "1px solid var(--border)", fontWeight: 600 }}>{d}</div>
+              ))}
+              {weeks.map((wk, wi) => (
+                <React.Fragment key={wi}>
+                  {wk.map((d, di) => {
+                    if (!d) return <div key={di} style={{ padding: 8, borderBottom: "1px solid var(--border)", background: "var(--bg)" }} />
+                    const dt = calBd[d] || []
+                    const rl = rT(dt)
+                    const hasSO = dt.some(isSO)
+                    const dr = Math.round(rl.reduce((a, t) => a + gR(t), 0) * 100) / 100
+                    const bg = hasSO && !rl.length ? "rgba(90,100,120,.08)" : rl.length ? (dr > 0 ? "rgba(0,214,143,.08)" : dr < 0 ? "rgba(255,71,87,.08)" : "var(--surface)") : "var(--surface)"
+                    return (
+                      <div key={di} style={{ padding: "6px 4px", borderBottom: "1px solid var(--border)", borderRight: "1px solid var(--border)", background: bg, minHeight: 55, cursor: dt.length ? "pointer" : "default" }}
+                        onClick={() => dt.length && setDayModal(makeDate(d))}>
+                        <div style={{ fontSize: 9, color: "var(--text3)", marginBottom: 3 }}>{d}</div>
+                        {hasSO && !rl.length ? <div style={{ fontSize: 10, color: "var(--text3)", fontWeight: 600 }}>SIN OP</div>
+                          : rl.length ? <><div style={{ fontSize: 13, fontWeight: 700, color: dr > 0 ? "var(--green)" : dr < 0 ? "var(--red)" : "var(--yellow)", fontFamily: "var(--mono)" }}>{fmt$(Math.round(dr * RV))}</div><div style={{ fontSize: 8, color: "var(--text3)", marginTop: 1 }}>{rl.length}t</div></>
+                          : <div style={{ fontSize: 8, color: "var(--text3)" }}>-</div>}
+                      </div>
+                    )
+                  })}
+                  {Array(7 - wk.length).fill(null).map((_, i) => <div key={`p${i}`} style={{ padding: 8, borderBottom: "1px solid var(--border)", background: "var(--bg)" }} />)}
+                </React.Fragment>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Trades */}
+        <div className="card" style={{ overflowX: "auto" }}>
+          <div className="st">Trades</div>
+          <table className="tbl">
+            <thead><tr><th>Fecha</th><th>Setup</th><th>B/S</th><th>R</th><th>P&L</th><th>Res</th></tr></thead>
+            <tbody>{real.slice(0, 50).map((t, i) => {
+              const r = gR(t)
+              return (<tr key={i}>
+                <td className="mono">{fmtD(t.fecha)}</td><td><STag s={t.setup} /></td><td><BTag b={t.buySell} /></td>
+                <td className="mono bold" style={{ color: r > 0 ? "var(--green)" : r < 0 ? "var(--red)" : "var(--yellow)" }}>{fmtR(r)}</td>
+                <td className="mono bold" style={{ color: r >= 0 ? "var(--green)" : "var(--red)" }}>{fmt$(Math.round(r * RV))}</td>
+                <td><RTag r={t.resultado} /></td>
+              </tr>)
+            })}</tbody>
+          </table>
+        </div>
+
+        {/* Footer */}
+        <div style={{ textAlign: "center", marginTop: 24, color: "var(--text3)", fontSize: 11, fontFamily: "var(--mono)" }}>
+          My Journal Pro{instagram ? ` — ${instagram.startsWith("@") ? instagram : "@" + instagram}` : ""}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function App() {
   const [user, setUser] = useState(() => {
     try { return JSON.parse(localStorage.getItem("btj_user")) }
     catch { return null }
   })
+
+  // Check for public link in URL
+  const pubId = new URLSearchParams(window.location.search).get("pub")
+  if (pubId) {
+    return <><style>{CSS}</style><PublicView linkId={pubId} /></>
+  }
 
   return (
     <>
