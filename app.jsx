@@ -811,7 +811,7 @@ function LoginScreen({ onLogin }) {
       const data = await res.json()
       if (!data.length) { setErr("No existe"); setLoading(false); return }
       if (data[0].password !== pass) { setErr("Incorrecta"); setLoading(false); return }
-      localStorage.setItem("btj_user", JSON.stringify({ id: data[0].id, username: data[0].username }))
+      localStorage.setItem("btj_user", JSON.stringify({ id: data[0].id, username: data[0].username, role: data[0].role || "user" }))
       onLogin(data[0])
     } catch { setErr("Error") }
     setLoading(false)
@@ -832,7 +832,7 @@ function LoginScreen({ onLogin }) {
       const res = await supa("users", { method: "POST", body: JSON.stringify({ username: user, password: pass }) })
       const data = await res.json()
       if (data && data[0]) {
-        localStorage.setItem("btj_user", JSON.stringify({ id: data[0].id, username: data[0].username }))
+        localStorage.setItem("btj_user", JSON.stringify({ id: data[0].id, username: data[0].username, role: data[0].role || "user" }))
         onLogin(data[0])
       } else setErr("Error al crear")
     } catch { setErr("Error") }
@@ -895,6 +895,12 @@ function MainApp({ user, onLogout }) {
   const [teamUser, setTeamUser] = useState(null)         // selected teammate to view
   const [teamMode, setTeamMode] = useState("bt")
   const [teamLoading, setTeamLoading] = useState(false)
+
+  // Admin state
+  const [adminUsers, setAdminUsers] = useState([])
+  const [adminViewUser, setAdminViewUser] = useState(null)
+  const [adminViewTrades, setAdminViewTrades] = useState([])
+  const [adminViewMode, setAdminViewMode] = useState("bt")
 
   // Trades del modo actual
   const trades = useMemo(() => allTrades.filter(t => (t.mode || "bt") === appMode), [allTrades, appMode])
@@ -978,6 +984,46 @@ function MainApp({ user, onLogout }) {
       }
     } catch (e) { console.error(e) }
     finally { setTeamLoading(false) }
+  }
+
+  // ── Admin functions ──
+  const loadAdminUsers = useCallback(async () => {
+    if (!isAdmin) return
+    try {
+      const res = await supa("users?select=id,username,role,created_at&order=created_at.asc")
+      const data = await res.json()
+      if (Array.isArray(data)) setAdminUsers(data)
+    } catch (e) { console.error(e) }
+  }, [isAdmin])
+
+  useEffect(() => { loadAdminUsers() }, [loadAdminUsers])
+
+  const adminResetPassword = async (userId, newPass) => {
+    if (!newPass || newPass.length < 4) return alert("Min 4 caracteres")
+    await supa(`users?id=eq.${userId}`, { method: "PATCH", body: JSON.stringify({ password: newPass }) })
+    alert("Contraseña actualizada")
+  }
+
+  const adminDeleteUser = async (userId, username) => {
+    if (username === "admin") return alert("No puedes borrar admin")
+    if (!confirm(`Borrar usuario "${username}" y TODOS sus trades?`)) return
+    if (!confirm("CONFIRMAR: Esto es permanente.")) return
+    await supa(`trades?user_id=eq.${userId}`, { method: "DELETE" })
+    await supa(`shares?owner_id=eq.${userId}`, { method: "DELETE" })
+    await supa(`shares?shared_with=eq.${userId}`, { method: "DELETE" })
+    await supa(`users?id=eq.${userId}`, { method: "DELETE" })
+    await loadAdminUsers()
+    alert("Usuario borrado")
+  }
+
+  const adminViewUserTrades = async (userId, mode) => {
+    setAdminViewUser(userId)
+    setAdminViewMode(mode)
+    try {
+      const res = await supa(`trades?user_id=eq.${userId}&mode=eq.${mode}&select=*&order=created_at.desc`)
+      const data = await res.json()
+      if (Array.isArray(data)) setAdminViewTrades(data.map(d2t))
+    } catch (e) { console.error(e) }
   }
 
   const setHI = v => setForm(f => ({ ...f, horaInicio: v, duracionTrade: String(cDur(v, f.horaFinal) || "") }))
@@ -1205,6 +1251,7 @@ function MainApp({ user, onLogout }) {
 
   const accentColor = appMode === "journal" ? "var(--purple)" : "var(--accent)"
   const modeLabel = appMode === "bt" ? "BACKTESTING" : "JOURNAL"
+  const isAdmin = (user.role || "user") === "admin"
 
   const nav = [
     { id: "dashboard", l: "Dashboard", i: "◈" },
@@ -1215,7 +1262,8 @@ function MainApp({ user, onLogout }) {
     { id: "setups", l: "Setups", i: "◆" },
     { id: "avanzado", l: "Avanzado", i: "◉" },
     { id: "tips", l: "Tips", i: "★" },
-    { id: "team", l: "Team", i: "♦" }
+    { id: "team", l: "Team", i: "♦" },
+    ...(isAdmin ? [{ id: "admin", l: "Admin", i: "⚙" }] : [])
   ]
 
   // ── Stats table helper ──
@@ -1792,35 +1840,30 @@ function MainApp({ user, onLogout }) {
   <>
     <h1 className="pt" style={{ marginBottom: 16 }}>Team</h1>
 
-    {/* ── Section 1: Compartir mis stats ── */}
+    {/* Section 1: Compartir */}
     <div className="card">
       <div className="st">Compartir mis stats</div>
-      <p style={{ fontSize: 12, color: "var(--text2)", marginBottom: 14 }}>Elige un usuario y que quieres compartir de tu modo {modeLabel}.</p>
+      <p style={{ fontSize: 12, color: "var(--text2)", marginBottom: 14 }}>Comparte tu modo {modeLabel} con un compañero.</p>
       <div className="form-grid">
-        <div className="field">
-          <label>Usuario</label>
+        <div className="field"><label>Usuario</label>
           <select className="inp" id="share-target" defaultValue="">
             <option value="">— Seleccionar —</option>
             {allUsers.map(u => <option key={u.id} value={u.id}>{u.username}</option>)}
           </select>
         </div>
-        <div className="field">
-          <label>Que compartir</label>
+        <div className="field"><label>Que compartir</label>
           <select className="inp" id="share-type" defaultValue="all">
             <option value="all">Todo</option>
-            <option value="month">Mes especifico</option>
-            <option value="daterange">Rango de fechas</option>
-            <option value="setup">Setup especifico</option>
+            <option value="month">Mes</option>
+            <option value="daterange">Rango fechas</option>
+            <option value="setup">Setup</option>
           </select>
         </div>
-        <div className="field">
-          <label>Filtro (si aplica)</label>
+        <div className="field"><label>Filtro</label>
           <input className="inp" id="share-filter" placeholder="ej: 2025-10 o M1" />
         </div>
       </div>
-      <p style={{ fontSize: 10, color: "var(--text3)", marginTop: 8 }}>
-        Filtro: Para mes usa YYYY-MM (ej: 2025-10). Para rango usa fecha1|fecha2 (ej: 2025-10-01|2025-11-30). Para setup el nombre (ej: M1).
-      </p>
+      <p style={{ fontSize: 10, color: "var(--text3)", marginTop: 8 }}>Mes: YYYY-MM | Rango: fecha1|fecha2 | Setup: nombre</p>
       <button className="btn bp" style={{ marginTop: 12 }} onClick={() => {
         const target = document.getElementById("share-target").value
         const type = document.getElementById("share-type").value
@@ -1830,31 +1873,27 @@ function MainApp({ user, onLogout }) {
       }} disabled={saving}>{saving ? "..." : "Compartir"}</button>
     </div>
 
-    {/* ── Section 2: Mis shares activos ── */}
+    {/* Section 2: Mis shares activos */}
     {myShares.length > 0 && (
       <div className="card">
         <div className="st">Mis shares activos</div>
         <table className="tbl">
           <thead><tr><th>Usuario</th><th>Modo</th><th>Tipo</th><th>Filtro</th><th></th></tr></thead>
-          <tbody>
-            {myShares.map(s => {
-              const u = allUsers.find(u => u.id === s.shared_with)
-              return (
-                <tr key={s.id}>
-                  <td className="mono" style={{ color: "var(--accent)" }}>{u ? u.username : "?"}</td>
-                  <td><span className={`tag ${s.mode === "journal" ? "tp" : "ta"}`}>{s.mode === "journal" ? "JOURNAL" : "BT"}</span></td>
-                  <td className="mono">{s.share_type}</td>
-                  <td className="mono" style={{ color: "var(--text3)" }}>{s.share_filter || "todo"}</td>
-                  <td><button className="btn bd bx" onClick={() => unshare(s.id)}>✕</button></td>
-                </tr>
-              )
-            })}
-          </tbody>
+          <tbody>{myShares.map(s => {
+            const u = allUsers.find(u2 => u2.id === s.shared_with)
+            return (<tr key={s.id}>
+              <td className="mono" style={{ color: "var(--accent)" }}>{u ? u.username : "?"}</td>
+              <td><span className={`tag ${s.mode === "journal" ? "tp" : "ta"}`}>{s.mode === "journal" ? "JOURNAL" : "BT"}</span></td>
+              <td className="mono">{s.share_type}</td>
+              <td className="mono" style={{ color: "var(--text3)" }}>{s.share_filter || "todo"}</td>
+              <td><button className="btn bd bx" onClick={() => unshare(s.id)}>✕</button></td>
+            </tr>)
+          })}</tbody>
         </table>
       </div>
     )}
 
-    {/* ── Section 3: Stats compartidos conmigo ── */}
+    {/* Section 3: Compartidos conmigo */}
     <div className="card">
       <div className="st">Compartidos conmigo</div>
       {teamShares.length === 0 && <div className="em">Nadie ha compartido contigo aun</div>}
@@ -1864,9 +1903,7 @@ function MainApp({ user, onLogout }) {
             const owner = allUsers.find(u => u.id === s.owner_id) || { username: "?" }
             const isActive = teamUser === s.owner_id && teamMode === s.mode
             return (
-              <button key={s.id}
-                className={`btn ${isActive ? "bp" : "bo"}`}
-                style={{ fontSize: 12 }}
+              <button key={s.id} className={`btn ${isActive ? "bp" : "bo"}`} style={{ fontSize: 12 }}
                 onClick={() => loadTeamTrades(s.owner_id, s)}>
                 {owner.username} <span style={{ fontSize: 10, opacity: 0.7 }}>{s.mode === "journal" ? "J" : "BT"}</span>
               </button>
@@ -1875,13 +1912,28 @@ function MainApp({ user, onLogout }) {
         </div>
       )}
 
-      {/* Teammate stats view */}
       {teamLoading && <div className="em">Cargando...</div>}
+
+      {/* ── Full teammate view ── */}
       {teamUser && !teamLoading && teamTrades.length > 0 && (() => {
         const ts = rT(teamTrades)
         const s = cS(ts)
         const ex = extraS(ts)
         const tName = (allUsers.find(u => u.id === teamUser) || { username: "?" }).username
+        const tDaily = grpBy(ts, t => t.fecha)
+        const tSetupStats = {}; SR.forEach(su => tSetupStats[su] = cS(ts.filter(t => t.setup === su)))
+        const tHour = hourAnalysis(ts)
+        // Calendar data for teammate
+        const now = new Date()
+        const tCalMonth = now.getMonth(), tCalYear = now.getFullYear()
+        const tCalBd = {}
+        teamTrades.forEach(t => { if (!t.fecha) return; const d = new Date(t.fecha); if (d.getMonth() === tCalMonth && d.getFullYear() === tCalYear) { const day = d.getDate(); if (!tCalBd[day]) tCalBd[day] = []; tCalBd[day].push(t) } })
+        const tDim = new Date(tCalYear, tCalMonth + 1, 0).getDate()
+        const tFd = new Date(tCalYear, tCalMonth, 1).getDay()
+        const tMn = new Date(tCalYear, tCalMonth).toLocaleString("es", { month: "long", year: "numeric" })
+        const tCells = []; for (let i = 0; i < tFd; i++) tCells.push(null); for (let d = 1; d <= tDim; d++) tCells.push(d)
+        const tWeeks = []; for (let i = 0; i < tCells.length; i += 7) tWeeks.push(tCells.slice(i, i + 7))
+
         return (
           <>
             <div style={{ marginBottom: 14, padding: "10px 16px", background: "var(--surface2)", borderRadius: 8, borderLeft: "3px solid var(--accent)" }}>
@@ -1889,6 +1941,7 @@ function MainApp({ user, onLogout }) {
               <span style={{ fontSize: 12, color: "var(--text3)", marginLeft: 8 }}>{ts.length} trades | {teamMode === "journal" ? "JOURNAL" : "BT"}</span>
             </div>
 
+            {/* Metrics */}
             <div className="metrics">
               <MC label="P&L" value={`${s.totalR >= 0 ? "+" : ""}${s.totalR}R`} sub={fmt$(s.totalDollar)} color={s.totalR >= 0 ? "var(--green)" : "var(--red)"} big />
               <MC label="Win%" value={`${s.winRate.toFixed(2)}%`} color={s.winRate >= 50 ? "var(--green)" : "var(--red)"} sub={`${s.wins}W|${s.losses}L|${s.bes}BE`} />
@@ -1898,6 +1951,7 @@ function MainApp({ user, onLogout }) {
               <MC label="Payoff" value={s.payoffRatio === Infinity ? "∞" : s.payoffRatio.toFixed(2)} color={s.payoffRatio >= 2 ? "var(--green)" : "var(--yellow)"} />
             </div>
 
+            {/* Resumen */}
             <div className="card" style={{ background: "var(--bg)" }}>
               <div className="st">Resumen</div>
               <div className="info-grid">
@@ -1906,41 +1960,209 @@ function MainApp({ user, onLogout }) {
                 <div className="info-item"><div className="ml">Ops/dia</div><div className="val">{ex.avgOps}</div></div>
                 <div className="info-item"><div className="ml">Racha WIN</div><div className="val" style={{ color: "var(--green)" }}>{s.maxWinStreak}</div></div>
                 <div className="info-item"><div className="ml">Racha LOSS</div><div className="val" style={{ color: "var(--red)" }}>{s.maxLossStreak}</div></div>
+                <div className="info-item"><div className="ml">Dur W/S/B</div><div className="val">{s.avgDurWin}/{s.avgDurSL}/{s.avgDurBE}min</div></div>
               </div>
             </div>
 
+            {/* Equity */}
             <div className="card" style={{ background: "var(--bg)" }}>
               <div className="st">Equity</div>
               <EC trades={ts} />
             </div>
 
-            {/* Trades table (read-only) */}
+            {/* Calendar */}
+            <div className="card" style={{ background: "var(--bg)", padding: 0, overflow: "hidden" }}>
+              <div style={{ padding: "12px 16px", borderBottom: "1px solid var(--border)", fontFamily: "var(--mono)", fontWeight: 700, fontSize: 14, textTransform: "capitalize" }}>{tMn}</div>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(7,1fr)", fontSize: 10, fontFamily: "var(--mono)" }}>
+                {["Do", "Lu", "Ma", "Mi", "Ju", "Vi", "Sa"].map(d => (
+                  <div key={d} style={{ padding: "6px 3px", textAlign: "center", color: "var(--text3)", borderBottom: "1px solid var(--border)", fontWeight: 600 }}>{d}</div>
+                ))}
+                {tWeeks.map((wk, wi) => (
+                  <React.Fragment key={wi}>
+                    {wk.map((d, di) => {
+                      if (!d) return <div key={di} style={{ padding: 8, borderBottom: "1px solid var(--border)", background: "var(--surface)" }} />
+                      const dt = tCalBd[d] || []
+                      const rl = rT(dt)
+                      const hasSO = dt.some(isSO)
+                      const dr = Math.round(rl.reduce((a, t) => a + gR(t), 0) * 100) / 100
+                      const bg = hasSO && !rl.length ? "rgba(90,100,120,.08)" : rl.length ? (dr > 0 ? "rgba(0,214,143,.08)" : dr < 0 ? "rgba(255,71,87,.08)" : "var(--surface)") : "var(--surface)"
+                      return (
+                        <div key={di} style={{ padding: "5px 3px", borderBottom: "1px solid var(--border)", borderRight: "1px solid var(--border)", background: bg, minHeight: 48 }}>
+                          <div style={{ fontSize: 8, color: "var(--text3)", marginBottom: 2 }}>{d}</div>
+                          {hasSO && !rl.length ? <div style={{ fontSize: 9, color: "var(--text3)" }}>SIN OP</div>
+                            : rl.length ? <div style={{ fontSize: 11, fontWeight: 700, color: dr > 0 ? "var(--green)" : dr < 0 ? "var(--red)" : "var(--yellow)", fontFamily: "var(--mono)" }}>{fmt$(Math.round(dr * RV))}</div>
+                            : <div style={{ fontSize: 8, color: "var(--text3)" }}>-</div>}
+                        </div>
+                      )
+                    })}
+                    {Array(7 - wk.length).fill(null).map((_, i) => <div key={`p${i}`} style={{ padding: 8, borderBottom: "1px solid var(--border)", background: "var(--surface)" }} />)}
+                  </React.Fragment>
+                ))}
+              </div>
+            </div>
+
+            {/* Setups */}
+            <div className="card" style={{ background: "var(--bg)" }}>
+              <div className="st">Setups</div>
+              <div className="g2">
+                {SR.map(su => {
+                  const ss = tSetupStats[su]
+                  if (!ss.total) return null
+                  return (
+                    <div key={su} style={{ background: "var(--surface)", borderRadius: 8, padding: 12, borderLeft: `3px solid ${ss.totalR > 0 ? "var(--green)" : "var(--red)"}` }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
+                        <span style={{ fontFamily: "var(--mono)", fontWeight: 700, color: "var(--accent)" }}>{su}</span>
+                        <span className="tag ta">{ss.total}</span>
+                      </div>
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6 }}>
+                        {[["Win%", `${ss.winRate.toFixed(1)}%`, ss.winRate >= 50 ? "var(--green)" : "var(--red)"],
+                          ["P&L", `${ss.totalR > 0 ? "+" : ""}${ss.totalR}R`, ss.totalR >= 0 ? "var(--green)" : "var(--red)"],
+                          ["PF", fmtPF(ss.profitFactor)]
+                        ].map(([l, v, c]) => (
+                          <div key={l}><div className="ml">{l}</div><div style={{ fontFamily: "var(--mono)", fontWeight: 600, fontSize: 13, color: c }}>{v}</div></div>
+                        ))}
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+
+            {/* Por hora */}
+            {tHour.length > 0 && (
+              <div className="card" style={{ background: "var(--bg)" }}>
+                <div className="st">Por hora</div>
+                <div style={{ overflowX: "auto" }}>
+                  <table className="tbl">
+                    <thead><tr><th>Hora</th><th>N</th><th>Win%</th><th>R</th><th>PF</th></tr></thead>
+                    <tbody>{tHour.map(h => (
+                      <tr key={h.hour}>
+                        <td className="mono bold">{h.hour}</td><td className="mono">{h.total}</td>
+                        <td className={`mono ${h.winRate >= 50 ? "g" : "r"}`}>{h.winRate.toFixed(2)}%</td>
+                        <td className={`mono bold ${h.totalR >= 0 ? "g" : "r"}`}>{h.totalR > 0 ? "+" : ""}{h.totalR}R</td>
+                        <td className="mono">{fmtPF(h.profitFactor)}</td>
+                      </tr>
+                    ))}</tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
+            {/* Trades recientes */}
             <div className="card" style={{ background: "var(--bg)", overflowX: "auto" }}>
               <div className="st">Trades recientes</div>
               <table className="tbl">
                 <thead><tr><th>Fecha</th><th>Setup</th><th>B/S</th><th>R</th><th>P&L</th><th>Res</th></tr></thead>
-                <tbody>
-                  {ts.slice(0, 20).map((t, i) => {
-                    const r = gR(t)
-                    return (
-                      <tr key={i}>
-                        <td className="mono">{fmtD(t.fecha)}</td>
-                        <td><STag s={t.setup} /></td>
-                        <td><BTag b={t.buySell} /></td>
-                        <td className="mono bold" style={{ color: r > 0 ? "var(--green)" : r < 0 ? "var(--red)" : "var(--yellow)" }}>{fmtR(r)}</td>
-                        <td className="mono bold" style={{ color: r >= 0 ? "var(--green)" : "var(--red)" }}>{fmt$(Math.round(r * RV))}</td>
-                        <td><RTag r={t.resultado} /></td>
-                      </tr>
-                    )
-                  })}
-                </tbody>
+                <tbody>{ts.slice(0, 30).map((t, i) => {
+                  const r = gR(t)
+                  return (<tr key={i}>
+                    <td className="mono">{fmtD(t.fecha)}</td><td><STag s={t.setup} /></td><td><BTag b={t.buySell} /></td>
+                    <td className="mono bold" style={{ color: r > 0 ? "var(--green)" : r < 0 ? "var(--red)" : "var(--yellow)" }}>{fmtR(r)}</td>
+                    <td className="mono bold" style={{ color: r >= 0 ? "var(--green)" : "var(--red)" }}>{fmt$(Math.round(r * RV))}</td>
+                    <td><RTag r={t.resultado} /></td>
+                  </tr>)
+                })}</tbody>
               </table>
-              {ts.length > 20 && <div style={{ fontSize: 11, color: "var(--text3)", textAlign: "center", padding: 8 }}>+ {ts.length - 20} mas</div>}
+              {ts.length > 30 && <div style={{ fontSize: 11, color: "var(--text3)", textAlign: "center", padding: 8 }}>+ {ts.length - 30} mas</div>}
             </div>
           </>
         )
       })()}
       {teamUser && !teamLoading && teamTrades.length === 0 && <div className="em">Sin trades en este filtro</div>}
+    </div>
+  </>
+)}
+
+{/* ═══ TAB: ADMIN (solo admin) ═══ */}
+{tab === "admin" && isAdmin && (
+  <>
+    <h1 className="pt" style={{ marginBottom: 16 }}>Admin <span style={{ fontSize: 14, color: "var(--red)", fontFamily: "var(--mono)" }}>⚙</span></h1>
+
+    {/* Users list */}
+    <div className="card">
+      <div className="st">Usuarios ({adminUsers.length})</div>
+      <table className="tbl">
+        <thead><tr><th>Usuario</th><th>Rol</th><th>Creado</th><th>Nueva pass</th><th></th></tr></thead>
+        <tbody>
+          {adminUsers.map(u => (
+            <tr key={u.id}>
+              <td className="mono" style={{ color: u.role === "admin" ? "var(--accent)" : "var(--text)", fontWeight: u.role === "admin" ? 700 : 400 }}>{u.username}</td>
+              <td><span className={`tag ${u.role === "admin" ? "ta" : "tgr"}`}>{u.role || "user"}</span></td>
+              <td className="mono" style={{ fontSize: 10, color: "var(--text3)" }}>{u.created_at ? new Date(u.created_at).toLocaleDateString() : "-"}</td>
+              <td>
+                <div style={{ display: "flex", gap: 4 }}>
+                  <input className="inp" style={{ width: 100, fontSize: 11, padding: "4px 8px" }} id={`pw-${u.id}`} placeholder="nueva..." />
+                  <button className="btn bo bx" onClick={() => {
+                    const inp = document.getElementById(`pw-${u.id}`)
+                    if (inp) adminResetPassword(u.id, inp.value)
+                  }}>OK</button>
+                </div>
+              </td>
+              <td>
+                {u.username !== "admin" && (
+                  <button className="btn bd bx" onClick={() => adminDeleteUser(u.id, u.username)}>Borrar</button>
+                )}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+
+    {/* View any user's stats */}
+    <div className="card">
+      <div className="st">Ver stats de usuario</div>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 14 }}>
+        {adminUsers.map(u => (
+          <div key={u.id} style={{ display: "flex", gap: 4 }}>
+            <button className={`btn ${adminViewUser === u.id && adminViewMode === "bt" ? "bp" : "bo"}`} style={{ fontSize: 11 }}
+              onClick={() => adminViewUserTrades(u.id, "bt")}>{u.username} BT</button>
+            <button className={`btn ${adminViewUser === u.id && adminViewMode === "journal" ? "bp" : "bo"}`} style={{ fontSize: 11 }}
+              onClick={() => adminViewUserTrades(u.id, "journal")}>{u.username} J</button>
+          </div>
+        ))}
+      </div>
+
+      {adminViewUser && adminViewTrades.length > 0 && (() => {
+        const ts = rT(adminViewTrades)
+        const s = cS(ts)
+        const uName = (adminUsers.find(u => u.id === adminViewUser) || { username: "?" }).username
+        return (
+          <>
+            <div style={{ marginBottom: 12, padding: "10px 16px", background: "var(--surface2)", borderRadius: 8, borderLeft: "3px solid var(--red)" }}>
+              <span style={{ fontFamily: "var(--mono)", fontSize: 14, fontWeight: 700, color: "var(--accent)" }}>{uName}</span>
+              <span style={{ fontSize: 12, color: "var(--text3)", marginLeft: 8 }}>{ts.length} trades | {adminViewMode.toUpperCase()}</span>
+            </div>
+            <div className="metrics">
+              <MC label="P&L" value={`${s.totalR >= 0 ? "+" : ""}${s.totalR}R`} sub={fmt$(s.totalDollar)} color={s.totalR >= 0 ? "var(--green)" : "var(--red)"} big />
+              <MC label="Win%" value={`${s.winRate.toFixed(2)}%`} color={s.winRate >= 50 ? "var(--green)" : "var(--red)"} sub={`${s.wins}W|${s.losses}L|${s.bes}BE`} />
+              <MC label="PF" value={fmtPF(s.profitFactor)} color={s.profitFactor >= 1.5 ? "var(--green)" : s.profitFactor >= 1 ? "var(--yellow)" : "var(--red)"} />
+              <MC label="Exp" value={`${s.expectancy}R`} color={s.expectancy > 0 ? "var(--green)" : "var(--red)"} />
+              <MC label="Trades" value={s.total} />
+            </div>
+            <div className="card" style={{ background: "var(--bg)" }}>
+              <div className="st">Equity</div>
+              <EC trades={ts} />
+            </div>
+            <div className="card" style={{ background: "var(--bg)", overflowX: "auto" }}>
+              <div className="st">Ultimos trades</div>
+              <table className="tbl">
+                <thead><tr><th>Fecha</th><th>Setup</th><th>R</th><th>P&L</th><th>Res</th></tr></thead>
+                <tbody>{ts.slice(0, 30).map((t, i) => {
+                  const r = gR(t)
+                  return (<tr key={i}>
+                    <td className="mono">{fmtD(t.fecha)}</td><td><STag s={t.setup} /></td>
+                    <td className="mono bold" style={{ color: r > 0 ? "var(--green)" : r < 0 ? "var(--red)" : "var(--yellow)" }}>{fmtR(r)}</td>
+                    <td className="mono bold" style={{ color: r >= 0 ? "var(--green)" : "var(--red)" }}>{fmt$(Math.round(r * RV))}</td>
+                    <td><RTag r={t.resultado} /></td>
+                  </tr>)
+                })}</tbody>
+              </table>
+            </div>
+          </>
+        )
+      })()}
+      {adminViewUser && adminViewTrades.length === 0 && <div className="em">Sin trades</div>}
     </div>
   </>
 )}
