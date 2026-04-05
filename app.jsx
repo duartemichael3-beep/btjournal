@@ -596,7 +596,9 @@ const DatePick = ({ value, onChange, label, compact }) => {
       </div>
       {/* Mini calendar popup */}
       {showCal && (
-        <div style={{ position: "absolute", top: "100%", left: 0, zIndex: 999, background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 10, padding: 12, marginTop: 4, width: 240, boxShadow: "0 8px 24px rgba(0,0,0,.4)" }}>
+        <>
+        <div style={{ position: "fixed", inset: 0, zIndex: 9997 }} onClick={() => setShowCal(false)} />
+        <div style={{ position: "fixed", top: "auto", left: "auto", zIndex: 9998, background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 10, padding: 12, marginTop: 4, width: 240, boxShadow: "0 8px 24px rgba(0,0,0,.6)" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
             <button onClick={calPrev} style={{ background: "none", border: "none", color: "var(--text2)", cursor: "pointer", fontSize: 14 }}>&lt;</button>
             <span style={{ fontFamily: "var(--mono)", fontSize: 11, fontWeight: 700, color: "var(--text)", textTransform: "capitalize" }}>
@@ -625,6 +627,7 @@ const DatePick = ({ value, onChange, label, compact }) => {
             <button onClick={() => setShowCal(false)} style={{ background: "none", border: "none", color: "var(--text3)", cursor: "pointer", fontSize: 10 }}>Cerrar</button>
           </div>
         </div>
+        </>
       )}
     </div>
   )
