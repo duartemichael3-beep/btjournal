@@ -1331,8 +1331,8 @@ function MainApp({ user, onLogout }) {
           </button>
         ))}
       </div>
-      <input type="date" className="inp" style={{ width: 130, fontSize: 11 }} value={fd1} onChange={e => setFd1(e.target.value)} title="Desde" />
-      <input type="date" className="inp" style={{ width: 130, fontSize: 11 }} value={fd2} onChange={e => setFd2(e.target.value)} title="Hasta" />
+      <div className="field" style={{ gap: 2 }}><label style={{ fontSize: 8 }}>Desde</label><input type="date" className="inp" style={{ width: 130, fontSize: 11 }} value={fd1} onChange={e => { const v = e.target.value; if (fd2 && v > fd2) { setFd1(fd2); setFd2(v) } else setFd1(v) }} /></div>
+      <div className="field" style={{ gap: 2 }}><label style={{ fontSize: 8 }}>Hasta</label><input type="date" className="inp" style={{ width: 130, fontSize: 11 }} value={fd2} onChange={e => { const v = e.target.value; if (fd1 && v < fd1) { setFd2(fd1); setFd1(v) } else setFd2(v) }} /></div>
       {(fd1 || fd2) && <button className="btn bx bo" onClick={() => { setFd1(""); setFd2("") }}>✕</button>}
     </div>
   )
