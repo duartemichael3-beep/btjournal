@@ -41,10 +41,8 @@ const DFT = {
 }
 // Trading hours 9:30 AM to 12:00 PM in 5-min intervals
 const HRS = []
-for (let h = 9; h <= 12; h++) {
-  const startM = h === 9 ? 30 : 0
-  const endM = h === 12 ? 0 : 55
-  for (let m = startM; m <= endM; m += 5) {
+for (let h = 0; h < 24; h++) {
+  for (let m = 0; m < 60; m++) {
     HRS.push(`${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`)
   }
 }
@@ -2919,3 +2917,5 @@ function App() {
 }
 
 ReactDOM.createRoot(document.getElementById('root')).render(<React.StrictMode><App /></React.StrictMode>)
+
+                 
