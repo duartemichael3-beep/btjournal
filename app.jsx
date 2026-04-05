@@ -1391,6 +1391,7 @@ function MainApp({ user, onLogout }) {
       </div>
       <DatePick value={fd1} onChange={v => { if (fd2 && v && v > fd2) { setFd1(fd2); setFd2(v); const dd = new Date(v + "T12:00:00"); setCM(dd.getMonth()); setCY(dd.getFullYear()) } else { setFd1(v); if (v) { const dd = new Date(v + "T12:00:00"); setCM(dd.getMonth()); setCY(dd.getFullYear()) } } }} label="Desde" compact />
       <DatePick value={fd2} onChange={v => { if (fd1 && v && v < fd1) { setFd2(fd1); setFd1(v); const dd = new Date(v + "T12:00:00"); setCM(dd.getMonth()); setCY(dd.getFullYear()) } else setFd2(v) }} label="Hasta" compact />
+      {(fd1 || fd2 || fS !== "all" || fP !== "all") && <button className="btn bo bx" style={{ fontSize: 10, marginTop: 14 }} onClick={() => { setFd1(""); setFd2(""); setFS("all"); setFP("all"); setFN(""); setCM(new Date().getMonth()); setCY(new Date().getFullYear()) }}>Reset</button>}
     </div>
   )
 
