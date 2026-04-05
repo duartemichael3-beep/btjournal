@@ -512,46 +512,58 @@ function parseNT8CSV(csvText) {
 
 // ── Small UI Components ──
 
-// Date picker component — friendly DD/MM/AA selectors
+// Date picker component — DD/Mes/AA dropdowns
 const MONTHS_ES = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"]
 const DatePick = ({ value, onChange, label, compact }) => {
-  // value is YYYY-MM-DD string, onChange receives YYYY-MM-DD
-  const d = value ? new Date(value + "T12:00:00") : null
-  const curDay = d ? d.getDate() : ""
-  const curMonth = d ? d.getMonth() : ""
-  const curYear = d ? d.getFullYear() : ""
+  const parsed = value ? new Date(value + "T12:00:00") : null
+  const [dd, setDD] = useState(parsed ? parsed.getDate() : "")
+  const [mm, setMM] = useState(parsed ? parsed.getMonth() : "")
+  const [yy, setYY] = useState(parsed ? parsed.getFullYear() : "")
+
+  useEffect(() => {
+    if (value) {
+      const p = new Date(value + "T12:00:00")
+      if (!isNaN(p)) { setDD(p.getDate()); setMM(p.getMonth()); setYY(p.getFullYear()) }
+    } else { setDD(""); setMM(""); setYY("") }
+  }, [value])
 
   const years = []
-  for (let y = 2024; y <= 2030; y++) years.push(y)
+  for (let y = 2020; y <= 2030; y++) years.push(y)
 
-  const daysInMonth = (m, y) => new Date(y || 2025, (m !== "" ? m : 0) + 1, 0).getDate()
+  const maxDay = mm !== "" && yy ? new Date(yy, mm + 1, 0).getDate() : 31
   const days = []
-  const maxD = curMonth !== "" && curYear ? daysInMonth(curMonth, curYear) : 31
-  for (let i = 1; i <= maxD; i++) days.push(i)
+  for (let i = 1; i <= maxDay; i++) days.push(i)
 
-  const buildDate = (day, month, year) => {
-    if (!day || month === "" || !year) return ""
-    return `${year}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`
+  const emit = (d, m, y) => {
+    if (d && m !== "" && y) {
+      const safe = Math.min(d, new Date(y, m + 1, 0).getDate())
+      onChange(`${y}-${String(m + 1).padStart(2, "0")}-${String(safe).padStart(2, "0")}`)
+    }
   }
 
-  const selStyle = { ...({ background: "var(--bg)", border: "1px solid var(--border2)", borderRadius: 6, color: "var(--text)", padding: compact ? "6px 4px" : "8px 6px", fontFamily: "var(--mono)", fontSize: compact ? 10 : 12, cursor: "pointer", appearance: "none", outline: "none" }) }
+  const ss = {
+    background: "var(--bg)", border: "1px solid var(--border2)", borderRadius: 6,
+    color: "var(--text)", padding: compact ? "6px 4px" : "8px 6px",
+    fontFamily: "var(--mono)", fontSize: compact ? 10 : 12, cursor: "pointer", outline: "none"
+  }
 
   return (
     <div className="field" style={{ gap: 3 }}>
       {label && <label>{label}</label>}
-      <div style={{ display: "flex", gap: 3 }}>
-        <select style={{ ...selStyle, width: compact ? 40 : 48 }} value={curDay} onChange={e => onChange(buildDate(parseInt(e.target.value), curMonth, curYear))}>
+      <div style={{ display: "flex", gap: 3, alignItems: "center" }}>
+        <select style={{ ...ss, width: compact ? 42 : 50 }} value={dd} onChange={e => { const v = parseInt(e.target.value); setDD(v); emit(v, mm, yy) }}>
           <option value="">DD</option>
           {days.map(d2 => <option key={d2} value={d2}>{String(d2).padStart(2, "0")}</option>)}
         </select>
-        <select style={{ ...selStyle, width: compact ? 48 : 56 }} value={curMonth} onChange={e => { const m = parseInt(e.target.value); onChange(buildDate(curDay || 1, m, curYear || 2025)) }}>
-          <option value="">MM</option>
+        <select style={{ ...ss, width: compact ? 52 : 60 }} value={mm} onChange={e => { const v = parseInt(e.target.value); setMM(v); if (!dd) setDD(1); if (!yy) setYY(new Date().getFullYear()); emit(dd || 1, v, yy || new Date().getFullYear()) }}>
+          <option value="">Mes</option>
           {MONTHS_ES.map((m, i) => <option key={i} value={i}>{m}</option>)}
         </select>
-        <select style={{ ...selStyle, width: compact ? 48 : 56 }} value={curYear} onChange={e => onChange(buildDate(curDay || 1, curMonth !== "" ? curMonth : 0, parseInt(e.target.value)))}>
-          <option value="">AA</option>
+        <select style={{ ...ss, width: compact ? 46 : 54 }} value={yy} onChange={e => { const v = parseInt(e.target.value); setYY(v); if (!dd) setDD(1); if (mm === "") setMM(0); emit(dd || 1, mm !== "" ? mm : 0, v) }}>
+          <option value="">Año</option>
           {years.map(y => <option key={y} value={y}>{String(y).slice(-2)}</option>)}
         </select>
+        {value && <button onClick={() => { setDD(""); setMM(""); setYY(""); onChange("") }} style={{ background: "none", border: "none", color: "var(--text3)", cursor: "pointer", fontSize: compact ? 10 : 12, padding: "0 4px" }}>✕</button>}
       </div>
     </div>
   )
@@ -1377,9 +1389,8 @@ function MainApp({ user, onLogout }) {
           </button>
         ))}
       </div>
-      <DatePick value={fd1} onChange={v => { if (fd2 && v > fd2) { setFd1(fd2); setFd2(v) } else setFd1(v) }} label="Desde" compact />
-      <DatePick value={fd2} onChange={v => { if (fd1 && v < fd1) { setFd2(fd1); setFd1(v) } else setFd2(v) }} label="Hasta" compact />
-      {(fd1 || fd2) && <button className="btn bx bo" onClick={() => { setFd1(""); setFd2("") }}>✕</button>}
+      <DatePick value={fd1} onChange={v => { if (fd2 && v && v > fd2) { setFd1(fd2); setFd2(v) } else setFd1(v) }} label="Desde" compact />
+      <DatePick value={fd2} onChange={v => { if (fd1 && v && v < fd1) { setFd2(fd1); setFd1(v) } else setFd2(v) }} label="Hasta" compact />
     </div>
   )
 
