@@ -511,6 +511,52 @@ function parseNT8CSV(csvText) {
 // ═══════════════════════════════════════════════
 
 // ── Small UI Components ──
+
+// Date picker component — friendly DD/MM/AA selectors
+const MONTHS_ES = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"]
+const DatePick = ({ value, onChange, label, compact }) => {
+  // value is YYYY-MM-DD string, onChange receives YYYY-MM-DD
+  const d = value ? new Date(value + "T12:00:00") : null
+  const curDay = d ? d.getDate() : ""
+  const curMonth = d ? d.getMonth() : ""
+  const curYear = d ? d.getFullYear() : ""
+
+  const years = []
+  for (let y = 2024; y <= 2030; y++) years.push(y)
+
+  const daysInMonth = (m, y) => new Date(y || 2025, (m !== "" ? m : 0) + 1, 0).getDate()
+  const days = []
+  const maxD = curMonth !== "" && curYear ? daysInMonth(curMonth, curYear) : 31
+  for (let i = 1; i <= maxD; i++) days.push(i)
+
+  const buildDate = (day, month, year) => {
+    if (!day || month === "" || !year) return ""
+    return `${year}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`
+  }
+
+  const selStyle = { ...({ background: "var(--bg)", border: "1px solid var(--border2)", borderRadius: 6, color: "var(--text)", padding: compact ? "6px 4px" : "8px 6px", fontFamily: "var(--mono)", fontSize: compact ? 10 : 12, cursor: "pointer", appearance: "none", outline: "none" }) }
+
+  return (
+    <div className="field" style={{ gap: 3 }}>
+      {label && <label>{label}</label>}
+      <div style={{ display: "flex", gap: 3 }}>
+        <select style={{ ...selStyle, width: compact ? 40 : 48 }} value={curDay} onChange={e => onChange(buildDate(parseInt(e.target.value), curMonth, curYear))}>
+          <option value="">DD</option>
+          {days.map(d2 => <option key={d2} value={d2}>{String(d2).padStart(2, "0")}</option>)}
+        </select>
+        <select style={{ ...selStyle, width: compact ? 48 : 56 }} value={curMonth} onChange={e => { const m = parseInt(e.target.value); onChange(buildDate(curDay || 1, m, curYear || 2025)) }}>
+          <option value="">MM</option>
+          {MONTHS_ES.map((m, i) => <option key={i} value={i}>{m}</option>)}
+        </select>
+        <select style={{ ...selStyle, width: compact ? 48 : 56 }} value={curYear} onChange={e => onChange(buildDate(curDay || 1, curMonth !== "" ? curMonth : 0, parseInt(e.target.value)))}>
+          <option value="">AA</option>
+          {years.map(y => <option key={y} value={y}>{String(y).slice(-2)}</option>)}
+        </select>
+      </div>
+    </div>
+  )
+}
+
 const TP = ({ value, onChange, label }) => (
   <div className="field">
     <label>{label}</label>
@@ -1006,7 +1052,7 @@ function MainApp({ user, onLogout }) {
         }
         setTeamTrades(t)
         // Auto-position calendar to month of most recent trade
-        const dates = t.filter(tr => tr.fecha).map(tr => new Date(tr.fecha)).sort((a, b) => b - a)
+        const dates = t.filter(tr => tr.fecha).map(tr => safeDate(tr.fecha)).filter(Boolean).sort((a, b) => b - a)
         if (dates.length) {
           setTCalM(dates[0].getMonth())
           setTCalY(dates[0].getFullYear())
@@ -1331,8 +1377,8 @@ function MainApp({ user, onLogout }) {
           </button>
         ))}
       </div>
-      <div className="field" style={{ gap: 2 }}><label style={{ fontSize: 8 }}>Desde</label><input type="date" className="inp" style={{ width: 130, fontSize: 11 }} value={fd1} onChange={e => { const v = e.target.value; if (fd2 && v > fd2) { setFd1(fd2); setFd2(v) } else setFd1(v) }} /></div>
-      <div className="field" style={{ gap: 2 }}><label style={{ fontSize: 8 }}>Hasta</label><input type="date" className="inp" style={{ width: 130, fontSize: 11 }} value={fd2} onChange={e => { const v = e.target.value; if (fd1 && v < fd1) { setFd2(fd1); setFd1(v) } else setFd2(v) }} /></div>
+      <DatePick value={fd1} onChange={v => { if (fd2 && v > fd2) { setFd1(fd2); setFd2(v) } else setFd1(v) }} label="Desde" compact />
+      <DatePick value={fd2} onChange={v => { if (fd1 && v < fd1) { setFd2(fd1); setFd1(v) } else setFd2(v) }} label="Hasta" compact />
       {(fd1 || fd2) && <button className="btn bx bo" onClick={() => { setFd1(""); setFd2("") }}>✕</button>}
     </div>
   )
@@ -1624,8 +1670,7 @@ function MainApp({ user, onLogout }) {
     <div className="card">
       <div className="form-grid">
         <div className="field">
-          <label>Fecha</label>
-          <input className="inp" type="date" value={form.fecha} onChange={e => setForm(f => ({ ...f, fecha: e.target.value }))} />
+          <DatePick value={form.fecha} onChange={v => setForm(f => ({ ...f, fecha: v }))} label="Fecha" />
         </div>
         <div className="field">
           <label>Razon / Notas</label>
@@ -1648,7 +1693,7 @@ function MainApp({ user, onLogout }) {
     <div className="card">
       <div className="st">General</div>
       <div className="form-grid">
-        {F("Fecha", "fecha", "date")}
+        <DatePick value={form.fecha} onChange={v => setForm(f => ({ ...f, fecha: v }))} label="Fecha" />
         <TP label="Hora inicio" value={form.horaInicio} onChange={setHI} />
         <TP label="Hora final" value={form.horaFinal} onChange={setHF} />
         <div className="field"><label>Dur</label><div className="af">{autoDur ? autoDur + "m" : "-"}</div></div>
@@ -1994,7 +2039,7 @@ function MainApp({ user, onLogout }) {
             {/* Calendar */}
             {tCalM !== null && tCalY !== null && (() => {
               const tCalBd = {}
-              teamTrades.forEach(t => { if (!t.fecha) return; const d = new Date(t.fecha); if (d.getMonth() === tCalM && d.getFullYear() === tCalY) { const day = d.getDate(); if (!tCalBd[day]) tCalBd[day] = []; tCalBd[day].push(t) } })
+              teamTrades.forEach(t => { if (!t.fecha) return; const d = safeDate(t.fecha); if (!d) return; if (d.getMonth() === tCalM && d.getFullYear() === tCalY) { const day = d.getDate(); if (!tCalBd[day]) tCalBd[day] = []; tCalBd[day].push(t) } })
               const tDim = new Date(tCalY, tCalM + 1, 0).getDate()
               const tFd = new Date(tCalY, tCalM, 1).getDay()
               const tMn = new Date(tCalY, tCalM).toLocaleString("es", { month: "long", year: "numeric" })
