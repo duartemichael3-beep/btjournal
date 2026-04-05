@@ -522,14 +522,13 @@ function parseNT8CSV(csvText) {
 
 // ── Small UI Components ──
 
-// Date picker component — DD/Mes/AA dropdowns
+// Date picker component — DD/Mes/AA dropdowns only
 const MONTHS_ES = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"]
 const DatePick = ({ value, onChange, label, compact }) => {
   const parsed = value ? new Date(value + "T12:00:00") : null
   const [dd, setDD] = useState(parsed ? parsed.getDate() : "")
   const [mm, setMM] = useState(parsed ? parsed.getMonth() : "")
   const [yy, setYY] = useState(parsed ? parsed.getFullYear() : "")
-  const [showCal, setShowCal] = useState(false)
 
   useEffect(() => {
     if (value) {
@@ -552,23 +551,6 @@ const DatePick = ({ value, onChange, label, compact }) => {
     }
   }
 
-  // Mini calendar state
-  const calM = mm !== "" ? mm : new Date().getMonth()
-  const calY = yy || new Date().getFullYear()
-  const calDim = new Date(calY, calM + 1, 0).getDate()
-  const calFwd = new Date(calY, calM, 1).getDay()
-  const calCells = []
-  for (let i = 0; i < calFwd; i++) calCells.push(null)
-  for (let d = 1; d <= calDim; d++) calCells.push(d)
-
-  const calPrev = () => { if (calM === 0) { setMM(11); setYY(calY - 1) } else setMM(calM - 1) }
-  const calNext = () => { if (calM === 11) { setMM(0); setYY(calY + 1) } else setMM(calM + 1) }
-  const calPick = (day) => {
-    setDD(day); setMM(calM); setYY(calY)
-    emit(day, calM, calY)
-    setShowCal(false)
-  }
-
   const ss = {
     background: "var(--bg)", border: "1px solid var(--border2)", borderRadius: 6,
     color: "var(--text)", padding: compact ? "6px 4px" : "8px 6px",
@@ -576,7 +558,7 @@ const DatePick = ({ value, onChange, label, compact }) => {
   }
 
   return (
-    <div className="field" style={{ gap: 3, position: "relative" }}>
+    <div className="field" style={{ gap: 3 }}>
       {label && <label>{label}</label>}
       <div style={{ display: "flex", gap: 3, alignItems: "center" }}>
         <select style={{ ...ss, width: compact ? 42 : 50 }} value={dd} onChange={e => { const v = parseInt(e.target.value); setDD(v); emit(v, mm, yy) }}>
@@ -591,44 +573,8 @@ const DatePick = ({ value, onChange, label, compact }) => {
           <option value="">Año</option>
           {years.map(y => <option key={y} value={y}>{String(y).slice(-2)}</option>)}
         </select>
-        <button onClick={() => setShowCal(!showCal)} style={{ background: "none", border: "1px solid var(--border2)", borderRadius: 6, color: "var(--text3)", cursor: "pointer", fontSize: compact ? 10 : 13, padding: compact ? "4px 6px" : "6px 8px" }}>📅</button>
         {value && <button onClick={() => { setDD(""); setMM(""); setYY(""); onChange("") }} style={{ background: "none", border: "none", color: "var(--text3)", cursor: "pointer", fontSize: compact ? 10 : 12, padding: "0 4px" }}>✕</button>}
       </div>
-      {/* Mini calendar popup */}
-      {showCal && (
-        <>
-        <div style={{ position: "fixed", inset: 0, zIndex: 9997 }} onClick={() => setShowCal(false)} />
-        <div style={{ position: "fixed", top: "auto", left: "auto", zIndex: 9998, background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 10, padding: 12, marginTop: 4, width: 240, boxShadow: "0 8px 24px rgba(0,0,0,.6)" }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-            <button onClick={calPrev} style={{ background: "none", border: "none", color: "var(--text2)", cursor: "pointer", fontSize: 14 }}>&lt;</button>
-            <span style={{ fontFamily: "var(--mono)", fontSize: 11, fontWeight: 700, color: "var(--text)", textTransform: "capitalize" }}>
-              {new Date(calY, calM).toLocaleString("es", { month: "long" })} {calY}
-            </span>
-            <button onClick={calNext} style={{ background: "none", border: "none", color: "var(--text2)", cursor: "pointer", fontSize: 14 }}>&gt;</button>
-          </div>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(7,1fr)", gap: 1, textAlign: "center", fontFamily: "var(--mono)", fontSize: 9 }}>
-            {["Do", "Lu", "Ma", "Mi", "Ju", "Vi", "Sa"].map(d => (
-              <div key={d} style={{ padding: 3, color: "var(--text3)", fontWeight: 600 }}>{d}</div>
-            ))}
-            {calCells.map((d, i) => (
-              <div key={i}
-                onClick={() => d && calPick(d)}
-                style={{
-                  padding: "5px 2px", borderRadius: 4, cursor: d ? "pointer" : "default",
-                  fontSize: 11, fontWeight: d === dd && calM === mm && calY === yy ? 700 : 400,
-                  color: d ? (d === dd && calM === mm && calY === yy ? "#fff" : "var(--text)") : "transparent",
-                  background: d === dd && calM === mm && calY === yy ? "var(--accent)" : d ? "transparent" : "transparent"
-                }}>
-                {d || ""}
-              </div>
-            ))}
-          </div>
-          <div style={{ textAlign: "right", marginTop: 6 }}>
-            <button onClick={() => setShowCal(false)} style={{ background: "none", border: "none", color: "var(--text3)", cursor: "pointer", fontSize: 10 }}>Cerrar</button>
-          </div>
-        </div>
-        </>
-      )}
     </div>
   )
 }
