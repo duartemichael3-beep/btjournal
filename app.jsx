@@ -973,21 +973,82 @@ function MainApp({ user, onLogout }) {
     const reader = new FileReader()
     reader.onload = async ev => {
       try {
-        const lines = ev.target.result.split("\n").filter(Boolean)
-        if (lines.length < 2) return
-        const hd = lines[0].split(",").map(h => h.replace(/"/g, "").trim())
-        const rows = lines.slice(1).map(line => {
-          const vs = (line.match(/(".*?"|[^",]+)/g) || []).map(v => v.replace(/"/g, "").trim())
+        const raw = ev.target.result.replace(/\r/g, "")
+        const allLines = raw.split("\n").filter(l => l.trim())
+        // Detect separator: ; or ,
+        const sep = allLines.some(l => l.split(";").length > 5) ? ";" : ","
+        // Find header row (the one containing "fecha")
+        let headerIdx = allLines.findIndex(l => l.toLowerCase().includes("fecha") && l.toLowerCase().includes("setup"))
+        if (headerIdx < 0) headerIdx = 0
+        const hd = allLines[headerIdx].split(sep).map(h => h.replace(/"/g, "").trim())
+        // Find data start: first row after header that starts with a date (20XX)
+        let dataStart = headerIdx + 1
+        while (dataStart < allLines.length && !/^\d{4}/.test(allLines[dataStart].trim().replace(/"/g, ""))) dataStart++
+        if (dataStart >= allLines.length) { alert("No se encontraron datos"); setSaving(false); return }
+
+        // Normalize values
+        const norm = (key, val) => {
+          if (!val) return val
+          // Fix decimal commas for numeric fields
+          if (["atr", "puntosSlStr", "ddPuntos", "rResultado", "rMaximo", "m5", "m15", "m30"].includes(key)) {
+            return val.replace(",", ".")
+          }
+          // Normalize contexto
+          if (key === "contexto") {
+            const u = val.toUpperCase()
+            if (u.includes("BREAK") || u.includes("ROMP")) return "ROMPIMIENTO"
+            if (u.includes("GIRO")) return "GIRO"
+            if (u.includes("APERT")) return "APERTURA"
+            return u
+          }
+          // Normalize buySell
+          if (key === "buySell") {
+            const u = val.toUpperCase()
+            if (u === "BULL" || u === "LONG" || u.startsWith("B")) return "BUY"
+            if (u === "BEAR" || u === "SHORT" || u.startsWith("S")) return "SELL"
+            return u
+          }
+          // Normalize resultado
+          if (key === "resultado") {
+            const u = val.toUpperCase().trim()
+            if (u === "WIN" || u === "W") return "WIN"
+            if (u === "SL" || u === "LOSS" || u === "L") return "SL"
+            if (u === "BE" || u === "BREAKEVEN") return "BE"
+            return u
+          }
+          // Normalize hayNoticia / breakRangoM30
+          if (key === "hayNoticia" || key === "breakRangoM30") {
+            const u = val.toUpperCase().trim()
+            return u === "SI" || u === "YES" || u === "S" ? "SI" : "NO"
+          }
+          // Fix hora format (9:48:00 -> 09:48)
+          if (key === "horaInicio" || key === "horaFinal") {
+            const parts = val.split(":")
+            if (parts.length >= 2) return `${parts[0].padStart(2, "0")}:${parts[1].padStart(2, "0")}`
+          }
+          return val
+        }
+
+        const rows = allLines.slice(dataStart).filter(l => /^\d{4}/.test(l.trim().replace(/"/g, ""))).map(line => {
+          const vs = line.split(sep).map(v => v.replace(/"/g, "").trim())
           const o = { ...DFT }
-          hd.forEach((h, i) => { if (vs[i]) o[h] = vs[i] })
+          hd.forEach((h, i) => { if (vs[i] && vs[i].length) o[h] = norm(h, vs[i]) })
+          // Auto-calc duracion
+          if (o.horaInicio && o.horaFinal) o.duracionTrade = String(cDur(o.horaInicio, o.horaFinal) || "")
+          // SL default
+          if (o.resultado === "SL" && !o.rResultado) o.rResultado = "-1"
+          if (o.resultado === "BE") o.rResultado = "0"
           return o
         })
+
+        if (!rows.length) { alert("No se encontraron trades validos"); setSaving(false); return }
+
         for (let i = 0; i < rows.length; i += 20) {
           await supa("trades", { method: "POST", body: JSON.stringify(rows.slice(i, i + 20).map(t => t2d(t, user.id, appMode))) })
         }
         await loadTrades()
         alert(rows.length + " trades importados")
-      } catch { alert("Error importando") }
+      } catch (err) { alert("Error importando: " + err.message) }
       finally { setSaving(false) }
     }
     reader.readAsText(f)
