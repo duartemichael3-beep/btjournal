@@ -897,6 +897,7 @@ function MainApp({ user, onLogout }) {
   const [teamLoading, setTeamLoading] = useState(false)
 
   // Admin state
+  const isAdmin = (user.role || "user") === "admin"
   const [adminUsers, setAdminUsers] = useState([])
   const [adminViewUser, setAdminViewUser] = useState(null)
   const [adminViewTrades, setAdminViewTrades] = useState([])
@@ -1251,7 +1252,6 @@ function MainApp({ user, onLogout }) {
 
   const accentColor = appMode === "journal" ? "var(--purple)" : "var(--accent)"
   const modeLabel = appMode === "bt" ? "BACKTESTING" : "JOURNAL"
-  const isAdmin = (user.role || "user") === "admin"
 
   const nav = [
     { id: "dashboard", l: "Dashboard", i: "◈" },
