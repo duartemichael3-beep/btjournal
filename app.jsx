@@ -244,8 +244,9 @@ const grpBy = (trades, fn) => {
 }
 
 function extraS(trades) {
+  const dflt = { bestDay: "-", worstDay: "-", avgOps: 0, bestWd: "-", worstWd: "-" }
   const t2 = rT(trades)
-  if (!t2.length) return { bestDay: "-", worstDay: "-", avgOps: 0, bestWd: "-", worstWd: "-" }
+  if (!t2.length) return dflt
   const bd = {}
   t2.forEach(t => {
     if (t.fecha) {
@@ -254,23 +255,29 @@ function extraS(trades) {
     }
   })
   const dt = Object.entries(bd).map(([d, ts]) => ({ d, r: ts.reduce((a, t) => a + gR(t), 0) }))
+  if (!dt.length) return dflt
   const best = dt.reduce((a, x) => x.r > a.r ? x : a, dt[0])
   const worst = dt.reduce((a, x) => x.r < a.r ? x : a, dt[0])
+
   const bw = {}
   t2.forEach(t => {
     if (t.fecha) {
       const wd = getDN(t.fecha)
-      if (!bw[wd]) bw[wd] = []
-      bw[wd].push(t)
+      if (wd) {
+        if (!bw[wd]) bw[wd] = []
+        bw[wd].push(t)
+      }
     }
   })
   const wt = Object.entries(bw).map(([wd, ts]) => ({ wd, r: ts.reduce((a, t) => a + gR(t), 0) }))
+  const bestDay = `${fmtD(best.d)} (${best.r > 0 ? "+" : ""}${Math.round(best.r * 100) / 100}R)`
+  const worstDay = `${fmtD(worst.d)} (${worst.r > 0 ? "+" : ""}${Math.round(worst.r * 100) / 100}R)`
+  const avgOps = Math.round(t2.length / Object.keys(bd).length * 100) / 100
+  if (!wt.length) return { bestDay, worstDay, avgOps, bestWd: "-", worstWd: "-" }
   const bestW = wt.reduce((a, x) => x.r > a.r ? x : a, wt[0])
   const worstW = wt.reduce((a, x) => x.r < a.r ? x : a, wt[0])
   return {
-    bestDay: `${fmtD(best.d)} (${best.r > 0 ? "+" : ""}${Math.round(best.r * 100) / 100}R)`,
-    worstDay: `${fmtD(worst.d)} (${worst.r > 0 ? "+" : ""}${Math.round(worst.r * 100) / 100}R)`,
-    avgOps: Math.round(t2.length / Object.keys(bd).length * 100) / 100,
+    bestDay, worstDay, avgOps,
     bestWd: `${bestW.wd} (${bestW.r > 0 ? "+" : ""}${Math.round(bestW.r * 100) / 100}R)`,
     worstWd: `${worstW.wd} (${worstW.r > 0 ? "+" : ""}${Math.round(worstW.r * 100) / 100}R)`
   }
