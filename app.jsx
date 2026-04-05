@@ -2010,11 +2010,15 @@ function MainApp({ user, onLogout }) {
                       <button className="btn bo bx" onClick={() => { if (tCalM === 11) { setTCalM(0); setTCalY(tCalY + 1) } else setTCalM(tCalM + 1) }}>&gt;</button>
                     </div>
                   </div>
-                  <div style={{ display: "grid", gridTemplateColumns: "repeat(7,1fr)", fontSize: 10, fontFamily: "var(--mono)" }}>
-                    {["Do", "Lu", "Ma", "Mi", "Ju", "Vi", "Sa"].map(d => (
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(8,1fr)", fontSize: 10, fontFamily: "var(--mono)" }}>
+                    {["Do", "Lu", "Ma", "Mi", "Ju", "Vi", "Sa", "Sem"].map(d => (
                       <div key={d} style={{ padding: "6px 3px", textAlign: "center", color: "var(--text3)", borderBottom: "1px solid var(--border)", fontWeight: 600 }}>{d}</div>
                     ))}
-                    {tWeeks.map((wk, wi) => (
+                    {tWeeks.map((wk, wi) => {
+                      let wkR = 0, wkC = 0
+                      wk.forEach(d => { if (d && tCalBd[d]) rT(tCalBd[d]).forEach(t => { wkR += gR(t); wkC++ }) })
+                      wkR = Math.round(wkR * 100) / 100
+                      return (
                       <React.Fragment key={wi}>
                         {wk.map((d, di) => {
                           if (!d) return <div key={di} style={{ padding: 8, borderBottom: "1px solid var(--border)", background: "var(--surface)" }} />
@@ -2038,8 +2042,14 @@ function MainApp({ user, onLogout }) {
                           )
                         })}
                         {Array(7 - wk.length).fill(null).map((_, i) => <div key={`p${i}`} style={{ padding: 8, borderBottom: "1px solid var(--border)", background: "var(--surface)" }} />)}
+                        <div style={{ padding: "6px 4px", borderBottom: "1px solid var(--border)", background: "var(--surface2)", display: "flex", flexDirection: "column", justifyContent: "center", alignItems: "center" }}>
+                          <div style={{ fontSize: 8, color: "var(--text3)" }}>S{wi + 1}</div>
+                          <div style={{ fontSize: 12, fontWeight: 700, color: wkR > 0 ? "var(--green)" : wkR < 0 ? "var(--red)" : "var(--text3)", fontFamily: "var(--mono)" }}>
+                            {wkC ? fmt$(Math.round(wkR * RV)) : "-"}
+                          </div>
+                        </div>
                       </React.Fragment>
-                    ))}
+                    )})}
                   </div>
                 </div>
               )
