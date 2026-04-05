@@ -691,6 +691,26 @@ function DayModal({ date, trades, onClose, onViewSS }) {
                 </tbody>
               </table>
             </div>
+
+            {/* Screenshots gallery */}
+            {real.some(t => t.screenshot) && (
+              <div style={{ marginTop: 14 }}>
+                <div className="ml" style={{ marginBottom: 8 }}>Screenshots</div>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  {real.filter(t => t.screenshot).map((t, i) => {
+                    const r = gR(t)
+                    return (
+                      <div key={i} style={{ position: "relative", cursor: "pointer" }} onClick={() => onViewSS(t.screenshot)}>
+                        <img src={t.screenshot} style={{ height: 90, borderRadius: 8, border: `2px solid ${r > 0 ? "var(--green)" : r < 0 ? "var(--red)" : "var(--yellow)"}` }} />
+                        <div style={{ position: "absolute", bottom: 4, left: 4, background: "rgba(0,0,0,.7)", borderRadius: 4, padding: "2px 6px", fontSize: 9, fontFamily: "var(--mono)", color: r > 0 ? "var(--green)" : r < 0 ? "var(--red)" : "var(--yellow)" }}>
+                          {fmtR(r)} {t.horaInicio}
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
           </>
         )}
 
@@ -895,6 +915,9 @@ function MainApp({ user, onLogout }) {
   const [teamUser, setTeamUser] = useState(null)         // selected teammate to view
   const [teamMode, setTeamMode] = useState("bt")
   const [teamLoading, setTeamLoading] = useState(false)
+  const [tCalM, setTCalM] = useState(null)  // team calendar month
+  const [tCalY, setTCalY] = useState(null)  // team calendar year
+  const [tDayModal, setTDayModal] = useState(null) // team day modal date
 
   // Admin state
   const isAdmin = (user.role || "user") === "admin"
@@ -982,6 +1005,12 @@ function MainApp({ user, onLogout }) {
           t = t.filter(tr => tr.setup === share.share_filter)
         }
         setTeamTrades(t)
+        // Auto-position calendar to month of most recent trade
+        const dates = t.filter(tr => tr.fecha).map(tr => new Date(tr.fecha)).sort((a, b) => b - a)
+        if (dates.length) {
+          setTCalM(dates[0].getMonth())
+          setTCalY(dates[0].getFullYear())
+        }
       }
     } catch (e) { console.error(e) }
     finally { setTeamLoading(false) }
@@ -1369,6 +1398,8 @@ function MainApp({ user, onLogout }) {
       {showNT8 && <NT8Modal onImport={handleNT8Import} onClose={() => setShowNT8(false)} />}
       {/* Day detail modal */}
       {dayModal && <DayModal date={dayModal} trades={trades} onClose={() => setDayModal(null)} onViewSS={setViewSS} />}
+      {/* Team day detail modal */}
+      {tDayModal && <DayModal date={tDayModal} trades={teamTrades} onClose={() => setTDayModal(null)} onViewSS={setViewSS} />}
       {/* Mobile overlay */}
       {sb && window.innerWidth <= 900 && <div className="overlay" onClick={() => setSb(false)} />}
 
@@ -1923,16 +1954,6 @@ function MainApp({ user, onLogout }) {
         const tDaily = grpBy(ts, t => t.fecha)
         const tSetupStats = {}; SR.forEach(su => tSetupStats[su] = cS(ts.filter(t => t.setup === su)))
         const tHour = hourAnalysis(ts)
-        // Calendar data for teammate
-        const now = new Date()
-        const tCalMonth = now.getMonth(), tCalYear = now.getFullYear()
-        const tCalBd = {}
-        teamTrades.forEach(t => { if (!t.fecha) return; const d = new Date(t.fecha); if (d.getMonth() === tCalMonth && d.getFullYear() === tCalYear) { const day = d.getDate(); if (!tCalBd[day]) tCalBd[day] = []; tCalBd[day].push(t) } })
-        const tDim = new Date(tCalYear, tCalMonth + 1, 0).getDate()
-        const tFd = new Date(tCalYear, tCalMonth, 1).getDay()
-        const tMn = new Date(tCalYear, tCalMonth).toLocaleString("es", { month: "long", year: "numeric" })
-        const tCells = []; for (let i = 0; i < tFd; i++) tCells.push(null); for (let d = 1; d <= tDim; d++) tCells.push(d)
-        const tWeeks = []; for (let i = 0; i < tCells.length; i += 7) tWeeks.push(tCells.slice(i, i + 7))
 
         return (
           <>
@@ -1971,35 +1992,58 @@ function MainApp({ user, onLogout }) {
             </div>
 
             {/* Calendar */}
-            <div className="card" style={{ background: "var(--bg)", padding: 0, overflow: "hidden" }}>
-              <div style={{ padding: "12px 16px", borderBottom: "1px solid var(--border)", fontFamily: "var(--mono)", fontWeight: 700, fontSize: 14, textTransform: "capitalize" }}>{tMn}</div>
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(7,1fr)", fontSize: 10, fontFamily: "var(--mono)" }}>
-                {["Do", "Lu", "Ma", "Mi", "Ju", "Vi", "Sa"].map(d => (
-                  <div key={d} style={{ padding: "6px 3px", textAlign: "center", color: "var(--text3)", borderBottom: "1px solid var(--border)", fontWeight: 600 }}>{d}</div>
-                ))}
-                {tWeeks.map((wk, wi) => (
-                  <React.Fragment key={wi}>
-                    {wk.map((d, di) => {
-                      if (!d) return <div key={di} style={{ padding: 8, borderBottom: "1px solid var(--border)", background: "var(--surface)" }} />
-                      const dt = tCalBd[d] || []
-                      const rl = rT(dt)
-                      const hasSO = dt.some(isSO)
-                      const dr = Math.round(rl.reduce((a, t) => a + gR(t), 0) * 100) / 100
-                      const bg = hasSO && !rl.length ? "rgba(90,100,120,.08)" : rl.length ? (dr > 0 ? "rgba(0,214,143,.08)" : dr < 0 ? "rgba(255,71,87,.08)" : "var(--surface)") : "var(--surface)"
-                      return (
-                        <div key={di} style={{ padding: "5px 3px", borderBottom: "1px solid var(--border)", borderRight: "1px solid var(--border)", background: bg, minHeight: 48 }}>
-                          <div style={{ fontSize: 8, color: "var(--text3)", marginBottom: 2 }}>{d}</div>
-                          {hasSO && !rl.length ? <div style={{ fontSize: 9, color: "var(--text3)" }}>SIN OP</div>
-                            : rl.length ? <div style={{ fontSize: 11, fontWeight: 700, color: dr > 0 ? "var(--green)" : dr < 0 ? "var(--red)" : "var(--yellow)", fontFamily: "var(--mono)" }}>{fmt$(Math.round(dr * RV))}</div>
-                            : <div style={{ fontSize: 8, color: "var(--text3)" }}>-</div>}
-                        </div>
-                      )
-                    })}
-                    {Array(7 - wk.length).fill(null).map((_, i) => <div key={`p${i}`} style={{ padding: 8, borderBottom: "1px solid var(--border)", background: "var(--surface)" }} />)}
-                  </React.Fragment>
-                ))}
-              </div>
-            </div>
+            {tCalM !== null && tCalY !== null && (() => {
+              const tCalBd = {}
+              teamTrades.forEach(t => { if (!t.fecha) return; const d = new Date(t.fecha); if (d.getMonth() === tCalM && d.getFullYear() === tCalY) { const day = d.getDate(); if (!tCalBd[day]) tCalBd[day] = []; tCalBd[day].push(t) } })
+              const tDim = new Date(tCalY, tCalM + 1, 0).getDate()
+              const tFd = new Date(tCalY, tCalM, 1).getDay()
+              const tMn = new Date(tCalY, tCalM).toLocaleString("es", { month: "long", year: "numeric" })
+              const tCells = []; for (let i = 0; i < tFd; i++) tCells.push(null); for (let d = 1; d <= tDim; d++) tCells.push(d)
+              const tWeeks = []; for (let i = 0; i < tCells.length; i += 7) tWeeks.push(tCells.slice(i, i + 7))
+              const tMakeDate = d => `${tCalY}-${String(tCalM + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`
+              return (
+                <div className="card" style={{ background: "var(--bg)", padding: 0, overflow: "hidden" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 16px", borderBottom: "1px solid var(--border)" }}>
+                    <span style={{ fontFamily: "var(--mono)", fontWeight: 700, fontSize: 14, textTransform: "capitalize" }}>{tMn}</span>
+                    <div style={{ display: "flex", gap: 6 }}>
+                      <button className="btn bo bx" onClick={() => { if (tCalM === 0) { setTCalM(11); setTCalY(tCalY - 1) } else setTCalM(tCalM - 1) }}>&lt;</button>
+                      <button className="btn bo bx" onClick={() => { if (tCalM === 11) { setTCalM(0); setTCalY(tCalY + 1) } else setTCalM(tCalM + 1) }}>&gt;</button>
+                    </div>
+                  </div>
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(7,1fr)", fontSize: 10, fontFamily: "var(--mono)" }}>
+                    {["Do", "Lu", "Ma", "Mi", "Ju", "Vi", "Sa"].map(d => (
+                      <div key={d} style={{ padding: "6px 3px", textAlign: "center", color: "var(--text3)", borderBottom: "1px solid var(--border)", fontWeight: 600 }}>{d}</div>
+                    ))}
+                    {tWeeks.map((wk, wi) => (
+                      <React.Fragment key={wi}>
+                        {wk.map((d, di) => {
+                          if (!d) return <div key={di} style={{ padding: 8, borderBottom: "1px solid var(--border)", background: "var(--surface)" }} />
+                          const dt = tCalBd[d] || []
+                          const rl = rT(dt)
+                          const hasSO = dt.some(isSO)
+                          const dr = Math.round(rl.reduce((a, t) => a + gR(t), 0) * 100) / 100
+                          const hasScreenshot = dt.some(t => t.screenshot)
+                          const bg = hasSO && !rl.length ? "rgba(90,100,120,.08)" : rl.length ? (dr > 0 ? "rgba(0,214,143,.08)" : dr < 0 ? "rgba(255,71,87,.08)" : "var(--surface)") : "var(--surface)"
+                          return (
+                            <div key={di} style={{ padding: "5px 3px", borderBottom: "1px solid var(--border)", borderRight: "1px solid var(--border)", background: bg, minHeight: 48, cursor: dt.length ? "pointer" : "default" }}
+                              onClick={() => dt.length && setTDayModal(tMakeDate(d))}>
+                              <div style={{ fontSize: 8, color: "var(--text3)", marginBottom: 2 }}>{d}</div>
+                              {hasSO && !rl.length ? <div style={{ fontSize: 9, color: "var(--text3)" }}>SIN OP</div>
+                                : rl.length ? <>
+                                    <div style={{ fontSize: 11, fontWeight: 700, color: dr > 0 ? "var(--green)" : dr < 0 ? "var(--red)" : "var(--yellow)", fontFamily: "var(--mono)" }}>{fmt$(Math.round(dr * RV))}</div>
+                                    <div style={{ fontSize: 8, color: "var(--text3)" }}>{rl.length}t{hasScreenshot ? " 📷" : ""}</div>
+                                  </>
+                                : <div style={{ fontSize: 8, color: "var(--text3)" }}>-</div>}
+                            </div>
+                          )
+                        })}
+                        {Array(7 - wk.length).fill(null).map((_, i) => <div key={`p${i}`} style={{ padding: 8, borderBottom: "1px solid var(--border)", background: "var(--surface)" }} />)}
+                      </React.Fragment>
+                    ))}
+                  </div>
+                </div>
+              )
+            })()}
 
             {/* Setups */}
             <div className="card" style={{ background: "var(--bg)" }}>
