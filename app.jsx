@@ -887,6 +887,15 @@ function MainApp({ user, onLogout }) {
   const [dayModal, setDayModal] = useState(null)
   const fileRef = useRef()
 
+  // Team state
+  const [teamShares, setTeamShares] = useState([])    // shares I received
+  const [myShares, setMyShares] = useState([])         // shares I gave
+  const [allUsers, setAllUsers] = useState([])          // all users for picker
+  const [teamTrades, setTeamTrades] = useState([])      // trades from selected teammate
+  const [teamUser, setTeamUser] = useState(null)         // selected teammate to view
+  const [teamMode, setTeamMode] = useState("bt")
+  const [teamLoading, setTeamLoading] = useState(false)
+
   // Trades del modo actual
   const trades = useMemo(() => allTrades.filter(t => (t.mode || "bt") === appMode), [allTrades, appMode])
 
@@ -906,6 +915,70 @@ function MainApp({ user, onLogout }) {
     window.addEventListener("resize", fn)
     return () => window.removeEventListener("resize", fn)
   }, [])
+
+  // ── Team functions ──
+  const loadTeam = useCallback(async () => {
+    try {
+      // Shares I received (others shared with me)
+      const r1 = await supa(`shares?shared_with=eq.${user.id}&select=*`)
+      const d1 = await r1.json()
+      if (Array.isArray(d1)) setTeamShares(d1)
+      // Shares I gave
+      const r2 = await supa(`shares?owner_id=eq.${user.id}&select=*`)
+      const d2 = await r2.json()
+      if (Array.isArray(d2)) setMyShares(d2)
+      // All users (for picker)
+      const r3 = await supa("users?select=id,username")
+      const d3 = await r3.json()
+      if (Array.isArray(d3)) setAllUsers(d3.filter(u => u.id !== user.id))
+    } catch (e) { console.error("team load error", e) }
+  }, [user.id])
+
+  useEffect(() => { loadTeam() }, [loadTeam])
+
+  const shareWith = async (targetUserId, shareType, shareFilter, mode) => {
+    setSaving(true)
+    try {
+      // Upsert: delete old + insert new
+      await supa(`shares?owner_id=eq.${user.id}&shared_with=eq.${targetUserId}&mode=eq.${mode}`, { method: "DELETE" })
+      await supa("shares", { method: "POST", body: JSON.stringify({ owner_id: user.id, shared_with: targetUserId, share_type: shareType, share_filter: shareFilter, mode }) })
+      await loadTeam()
+      alert("Compartido!")
+    } catch (e) { alert("Error: " + e.message) }
+    finally { setSaving(false) }
+  }
+
+  const unshare = async (shareId) => {
+    if (!confirm("Dejar de compartir?")) return
+    await supa(`shares?id=eq.${shareId}`, { method: "DELETE" })
+    await loadTeam()
+  }
+
+  const loadTeamTrades = async (ownerId, share) => {
+    setTeamLoading(true)
+    setTeamUser(ownerId)
+    setTeamMode(share.mode || "bt")
+    try {
+      let query = `trades?user_id=eq.${ownerId}&mode=eq.${share.mode || "bt"}&select=*&order=created_at.desc`
+      const res = await supa(query)
+      const data = await res.json()
+      if (Array.isArray(data)) {
+        let t = data.map(d2t)
+        // Apply share filter
+        if (share.share_type === "month" && share.share_filter) {
+          t = t.filter(tr => tr.fecha && tr.fecha.startsWith(share.share_filter))
+        } else if (share.share_type === "daterange" && share.share_filter) {
+          const [d1, d2] = share.share_filter.split("|")
+          if (d1) t = t.filter(tr => tr.fecha >= d1)
+          if (d2) t = t.filter(tr => tr.fecha <= d2)
+        } else if (share.share_type === "setup" && share.share_filter) {
+          t = t.filter(tr => tr.setup === share.share_filter)
+        }
+        setTeamTrades(t)
+      }
+    } catch (e) { console.error(e) }
+    finally { setTeamLoading(false) }
+  }
 
   const setHI = v => setForm(f => ({ ...f, horaInicio: v, duracionTrade: String(cDur(v, f.horaFinal) || "") }))
   const setHF = v => setForm(f => ({ ...f, horaFinal: v, duracionTrade: String(cDur(f.horaInicio, v) || "") }))
@@ -1141,7 +1214,8 @@ function MainApp({ user, onLogout }) {
     { id: "estadisticas", l: "Stats", i: "▥" },
     { id: "setups", l: "Setups", i: "◆" },
     { id: "avanzado", l: "Avanzado", i: "◉" },
-    { id: "tips", l: "Tips", i: "★" }
+    { id: "tips", l: "Tips", i: "★" },
+    { id: "team", l: "Team", i: "♦" }
   ]
 
   // ── Stats table helper ──
@@ -1525,7 +1599,7 @@ function MainApp({ user, onLogout }) {
       <div className="form-grid">
         {F("Resultado", "resultado", null, RESS)}
         {(isWin || (appMode === "journal" && form.resultado === "SL")) && F("R", "rResultado", "number")}
-        {isWin && F("Rmax", "rMaximo", "number")}
+        {(isWin || form.resultado === "BE") && F("Rmax", "rMaximo", "number")}
         {F("Break M30", "breakRangoM30", null, ["NO", "SI"])}
         {F("Dir", "direccionDia", null, DIRS)}
       </div>
@@ -1710,6 +1784,164 @@ function MainApp({ user, onLogout }) {
         </div>
       )
     }) : <div className="em">Min 5 trades</div>}
+  </>
+)}
+
+{/* ═══ TAB: TEAM ═══ */}
+{tab === "team" && (
+  <>
+    <h1 className="pt" style={{ marginBottom: 16 }}>Team</h1>
+
+    {/* ── Section 1: Compartir mis stats ── */}
+    <div className="card">
+      <div className="st">Compartir mis stats</div>
+      <p style={{ fontSize: 12, color: "var(--text2)", marginBottom: 14 }}>Elige un usuario y que quieres compartir de tu modo {modeLabel}.</p>
+      <div className="form-grid">
+        <div className="field">
+          <label>Usuario</label>
+          <select className="inp" id="share-target" defaultValue="">
+            <option value="">— Seleccionar —</option>
+            {allUsers.map(u => <option key={u.id} value={u.id}>{u.username}</option>)}
+          </select>
+        </div>
+        <div className="field">
+          <label>Que compartir</label>
+          <select className="inp" id="share-type" defaultValue="all">
+            <option value="all">Todo</option>
+            <option value="month">Mes especifico</option>
+            <option value="daterange">Rango de fechas</option>
+            <option value="setup">Setup especifico</option>
+          </select>
+        </div>
+        <div className="field">
+          <label>Filtro (si aplica)</label>
+          <input className="inp" id="share-filter" placeholder="ej: 2025-10 o M1" />
+        </div>
+      </div>
+      <p style={{ fontSize: 10, color: "var(--text3)", marginTop: 8 }}>
+        Filtro: Para mes usa YYYY-MM (ej: 2025-10). Para rango usa fecha1|fecha2 (ej: 2025-10-01|2025-11-30). Para setup el nombre (ej: M1).
+      </p>
+      <button className="btn bp" style={{ marginTop: 12 }} onClick={() => {
+        const target = document.getElementById("share-target").value
+        const type = document.getElementById("share-type").value
+        const filter = document.getElementById("share-filter").value
+        if (!target) return alert("Selecciona un usuario")
+        shareWith(target, type, filter, appMode)
+      }} disabled={saving}>{saving ? "..." : "Compartir"}</button>
+    </div>
+
+    {/* ── Section 2: Mis shares activos ── */}
+    {myShares.length > 0 && (
+      <div className="card">
+        <div className="st">Mis shares activos</div>
+        <table className="tbl">
+          <thead><tr><th>Usuario</th><th>Modo</th><th>Tipo</th><th>Filtro</th><th></th></tr></thead>
+          <tbody>
+            {myShares.map(s => {
+              const u = allUsers.find(u => u.id === s.shared_with)
+              return (
+                <tr key={s.id}>
+                  <td className="mono" style={{ color: "var(--accent)" }}>{u ? u.username : "?"}</td>
+                  <td><span className={`tag ${s.mode === "journal" ? "tp" : "ta"}`}>{s.mode === "journal" ? "JOURNAL" : "BT"}</span></td>
+                  <td className="mono">{s.share_type}</td>
+                  <td className="mono" style={{ color: "var(--text3)" }}>{s.share_filter || "todo"}</td>
+                  <td><button className="btn bd bx" onClick={() => unshare(s.id)}>✕</button></td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      </div>
+    )}
+
+    {/* ── Section 3: Stats compartidos conmigo ── */}
+    <div className="card">
+      <div className="st">Compartidos conmigo</div>
+      {teamShares.length === 0 && <div className="em">Nadie ha compartido contigo aun</div>}
+      {teamShares.length > 0 && (
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 14 }}>
+          {teamShares.map(s => {
+            const owner = allUsers.find(u => u.id === s.owner_id) || { username: "?" }
+            const isActive = teamUser === s.owner_id && teamMode === s.mode
+            return (
+              <button key={s.id}
+                className={`btn ${isActive ? "bp" : "bo"}`}
+                style={{ fontSize: 12 }}
+                onClick={() => loadTeamTrades(s.owner_id, s)}>
+                {owner.username} <span style={{ fontSize: 10, opacity: 0.7 }}>{s.mode === "journal" ? "J" : "BT"}</span>
+              </button>
+            )
+          })}
+        </div>
+      )}
+
+      {/* Teammate stats view */}
+      {teamLoading && <div className="em">Cargando...</div>}
+      {teamUser && !teamLoading && teamTrades.length > 0 && (() => {
+        const ts = rT(teamTrades)
+        const s = cS(ts)
+        const ex = extraS(ts)
+        const tName = (allUsers.find(u => u.id === teamUser) || { username: "?" }).username
+        return (
+          <>
+            <div style={{ marginBottom: 14, padding: "10px 16px", background: "var(--surface2)", borderRadius: 8, borderLeft: "3px solid var(--accent)" }}>
+              <span style={{ fontFamily: "var(--mono)", fontSize: 14, fontWeight: 700, color: "var(--accent)" }}>{tName}</span>
+              <span style={{ fontSize: 12, color: "var(--text3)", marginLeft: 8 }}>{ts.length} trades | {teamMode === "journal" ? "JOURNAL" : "BT"}</span>
+            </div>
+
+            <div className="metrics">
+              <MC label="P&L" value={`${s.totalR >= 0 ? "+" : ""}${s.totalR}R`} sub={fmt$(s.totalDollar)} color={s.totalR >= 0 ? "var(--green)" : "var(--red)"} big />
+              <MC label="Win%" value={`${s.winRate.toFixed(2)}%`} color={s.winRate >= 50 ? "var(--green)" : "var(--red)"} sub={`${s.wins}W|${s.losses}L|${s.bes}BE`} />
+              <MC label="PF" value={fmtPF(s.profitFactor)} color={s.profitFactor >= 1.5 ? "var(--green)" : s.profitFactor >= 1 ? "var(--yellow)" : "var(--red)"} />
+              <MC label="Exp" value={`${s.expectancy}R`} color={s.expectancy > 0 ? "var(--green)" : "var(--red)"} sub={fmt$(s.expectDollar) + "/t"} />
+              <MC label="Sharpe" value={s.sharpeRatio.toFixed(2)} color={s.sharpeRatio >= 1 ? "var(--green)" : s.sharpeRatio >= 0.5 ? "var(--yellow)" : "var(--red)"} />
+              <MC label="Payoff" value={s.payoffRatio === Infinity ? "∞" : s.payoffRatio.toFixed(2)} color={s.payoffRatio >= 2 ? "var(--green)" : "var(--yellow)"} />
+            </div>
+
+            <div className="card" style={{ background: "var(--bg)" }}>
+              <div className="st">Resumen</div>
+              <div className="info-grid">
+                <div className="info-item"><div className="ml">Dia + ganador</div><div className="val" style={{ color: "var(--green)" }}>{ex.bestDay}</div></div>
+                <div className="info-item"><div className="ml">Dia + perdedor</div><div className="val" style={{ color: "var(--red)" }}>{ex.worstDay}</div></div>
+                <div className="info-item"><div className="ml">Ops/dia</div><div className="val">{ex.avgOps}</div></div>
+                <div className="info-item"><div className="ml">Racha WIN</div><div className="val" style={{ color: "var(--green)" }}>{s.maxWinStreak}</div></div>
+                <div className="info-item"><div className="ml">Racha LOSS</div><div className="val" style={{ color: "var(--red)" }}>{s.maxLossStreak}</div></div>
+              </div>
+            </div>
+
+            <div className="card" style={{ background: "var(--bg)" }}>
+              <div className="st">Equity</div>
+              <EC trades={ts} />
+            </div>
+
+            {/* Trades table (read-only) */}
+            <div className="card" style={{ background: "var(--bg)", overflowX: "auto" }}>
+              <div className="st">Trades recientes</div>
+              <table className="tbl">
+                <thead><tr><th>Fecha</th><th>Setup</th><th>B/S</th><th>R</th><th>P&L</th><th>Res</th></tr></thead>
+                <tbody>
+                  {ts.slice(0, 20).map((t, i) => {
+                    const r = gR(t)
+                    return (
+                      <tr key={i}>
+                        <td className="mono">{fmtD(t.fecha)}</td>
+                        <td><STag s={t.setup} /></td>
+                        <td><BTag b={t.buySell} /></td>
+                        <td className="mono bold" style={{ color: r > 0 ? "var(--green)" : r < 0 ? "var(--red)" : "var(--yellow)" }}>{fmtR(r)}</td>
+                        <td className="mono bold" style={{ color: r >= 0 ? "var(--green)" : "var(--red)" }}>{fmt$(Math.round(r * RV))}</td>
+                        <td><RTag r={t.resultado} /></td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+              {ts.length > 20 && <div style={{ fontSize: 11, color: "var(--text3)", textAlign: "center", padding: 8 }}>+ {ts.length - 20} mas</div>}
+            </div>
+          </>
+        )
+      })()}
+      {teamUser && !teamLoading && teamTrades.length === 0 && <div className="em">Sin trades en este filtro</div>}
+    </div>
   </>
 )}
 
