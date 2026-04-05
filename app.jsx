@@ -1165,7 +1165,7 @@ function LoginScreen({ onLogin }) {
   const handleKey = e => { if (e.key === "Enter") { mode === "login" ? doLogin() : doRegister() } }
 
   return (
-    <div style={{ minHeight: "100vh", background: "var(--bg)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+    <div style={{ minHeight: "100vh", width: "100%", background: "var(--bg)", display: "flex", alignItems: "center", justifyContent: "center" }}>
       <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 16, padding: "40px 36px", width: 360, maxWidth: "90vw" }}>
         <h1 style={{ fontSize: 24, fontWeight: 700, color: "var(--accent)", textAlign: "center", marginBottom: 4, fontFamily: "var(--mono)" }}>My Journal Pro</h1>
         <p style={{ textAlign: "center", color: "var(--text3)", fontSize: 12, marginBottom: 28, fontFamily: "var(--mono)" }}>Trading Journal</p>
