@@ -130,6 +130,9 @@ const hBucket = h => {
   return `${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}`
 }
 
+// Password helper (plain text)
+const hashPass = async (text) => text
+
 // ═══════════════════════════════════════════════
 // DB MAPPING
 // ═══════════════════════════════════════════════
@@ -1123,6 +1126,7 @@ function LoginScreen({ onLogin }) {
   const [mode, setMode] = useState("login")
   const [user, setUser] = useState("")
   const [pass, setPass] = useState("")
+  const [inviteCode, setInviteCode] = useState("")
   const [err, setErr] = useState("")
   const [loading, setLoading] = useState(false)
 
@@ -1133,7 +1137,8 @@ function LoginScreen({ onLogin }) {
       const res = await supa(`users?username=eq.${encodeURIComponent(user)}&select=*`)
       const data = await res.json()
       if (!data.length) { setErr("No existe"); setLoading(false); return }
-      if (data[0].password !== pass) { setErr("Incorrecta"); setLoading(false); return }
+      const hashed = await hashPass(pass)
+      if (data[0].password !== hashed) { setErr("Incorrecta"); setLoading(false); return }
       localStorage.setItem("btj_user", JSON.stringify({ id: data[0].id, username: data[0].username, role: data[0].role || "user", instagram: data[0].instagram || "" }))
       onLogin(data[0])
     } catch { setErr("Error") }
@@ -1142,23 +1147,32 @@ function LoginScreen({ onLogin }) {
 
   const doRegister = async () => {
     if (!user || !pass) return setErr("Llena ambos campos")
+    if (!inviteCode.trim()) return setErr("Codigo de invitacion requerido")
     if (user.length < 3) return setErr("Min 3 caracteres")
     if (pass.length < 4) return setErr("Min 4 caracteres")
     setLoading(true); setErr("")
     try {
+      // Verify invite code
+      const codeRes = await supa(`invite_codes?code=eq.${encodeURIComponent(inviteCode.trim())}&used_by=is.null&select=*`)
+      const codeData = await codeRes.json()
+      if (!codeData || !codeData.length) { setErr("Codigo invalido o ya usado"); setLoading(false); return }
       const countRes = await supa("users?select=id")
       const countData = await countRes.json()
       if (countData.length >= 8) { setErr("Max 8 usuarios"); setLoading(false); return }
       const chk = await supa(`users?username=eq.${encodeURIComponent(user)}&select=id`)
       const chkD = await chk.json()
       if (chkD.length) { setErr("Ya existe"); setLoading(false); return }
-      const res = await supa("users", { method: "POST", body: JSON.stringify({ username: user, password: pass }) })
+      // Hash password
+      const hashed = await hashPass(pass)
+      const res = await supa("users", { method: "POST", body: JSON.stringify({ username: user, password: hashed }) })
       const data = await res.json()
       if (data && data[0]) {
+        // Mark invite code as used
+        await supa(`invite_codes?id=eq.${codeData[0].id}`, { method: "PATCH", body: JSON.stringify({ used_by: data[0].id, used_at: new Date().toISOString() }) })
         localStorage.setItem("btj_user", JSON.stringify({ id: data[0].id, username: data[0].username, role: data[0].role || "user", instagram: data[0].instagram || "" }))
         onLogin(data[0])
       } else setErr("Error al crear")
-    } catch { setErr("Error") }
+    } catch (e) { setErr("Error: " + e.message) }
     setLoading(false)
   }
 
@@ -1176,6 +1190,7 @@ function LoginScreen({ onLogin }) {
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
           <div className="field"><label>Usuario</label><input className="inp" value={user} onChange={e => setUser(e.target.value.toLowerCase().trim())} onKeyDown={handleKey} /></div>
           <div className="field"><label>Contrasena</label><input className="inp" type="password" value={pass} onChange={e => setPass(e.target.value)} onKeyDown={handleKey} /></div>
+          {mode === "register" && <div className="field"><label>Codigo de invitacion</label><input className="inp" value={inviteCode} onChange={e => setInviteCode(e.target.value)} onKeyDown={handleKey} placeholder="Requerido" /></div>}
           {err && <div style={{ color: "var(--red)", fontSize: 12, fontFamily: "var(--mono)", textAlign: "center" }}>{err}</div>}
           <button className="btn bp" style={{ width: "100%", marginTop: 8 }} onClick={mode === "login" ? doLogin : doRegister} disabled={loading}>
             {loading ? "..." : mode === "login" ? "Entrar" : "Crear cuenta"}
@@ -1231,6 +1246,7 @@ function MainApp({ user, onLogout }) {
   const [adminViewUser, setAdminViewUser] = useState(null)
   const [adminViewTrades, setAdminViewTrades] = useState([])
   const [adminViewMode, setAdminViewMode] = useState("bt")
+  const [inviteCodes, setInviteCodes] = useState([])
 
   // Trades del modo actual
   const trades = useMemo(() => allTrades.filter(t => (t.mode || "bt") === appMode), [allTrades, appMode])
@@ -1334,10 +1350,37 @@ function MainApp({ user, onLogout }) {
 
   useEffect(() => { loadAdminUsers() }, [loadAdminUsers])
 
+  const loadInviteCodes = useCallback(async () => {
+    if (!isAdmin) return
+    try {
+      const res = await supa("invite_codes?select=*&order=created_at.desc")
+      const data = await res.json()
+      if (Array.isArray(data)) setInviteCodes(data)
+    } catch (e) { console.error(e) }
+  }, [isAdmin])
+
+  useEffect(() => { loadInviteCodes() }, [loadInviteCodes])
+
+  const generateInviteCode = async () => {
+    const code = "MJP-" + Math.random().toString(36).slice(2, 8).toUpperCase()
+    try {
+      await supa("invite_codes", { method: "POST", body: JSON.stringify({ code, created_by: user.id }) })
+      await loadInviteCodes()
+      try { await navigator.clipboard.writeText(code) } catch {}
+      alert(`Codigo generado: ${code} (copiado al clipboard)`)
+    } catch (e) { alert("Error: " + e.message) }
+  }
+
+  const deleteInviteCode = async (codeId) => {
+    await supa(`invite_codes?id=eq.${codeId}`, { method: "DELETE" })
+    await loadInviteCodes()
+  }
+
   const adminResetPassword = async (userId, newPass) => {
     if (!newPass || newPass.length < 4) return alert("Min 4 caracteres")
-    await supa(`users?id=eq.${userId}`, { method: "PATCH", body: JSON.stringify({ password: newPass }) })
-    alert("Contraseña actualizada")
+    const hashed = await hashPass(newPass)
+    await supa(`users?id=eq.${userId}`, { method: "PATCH", body: JSON.stringify({ password: hashed }) })
+    alert("Contraseña actualizada (hasheada)")
   }
 
   const adminDeleteUser = async (userId, username) => {
@@ -2504,6 +2547,33 @@ function MainApp({ user, onLogout }) {
           ))}
         </tbody>
       </table>
+    </div>
+
+    {/* Invite Codes */}
+    <div className="card">
+      <div className="st">Codigos de invitacion</div>
+      <p style={{ fontSize: 11, color: "var(--text3)", marginBottom: 12 }}>Cada codigo se usa una sola vez para crear una cuenta.</p>
+      <button className="btn bp bs" onClick={generateInviteCode} style={{ marginBottom: 14 }}>+ Generar codigo</button>
+      {inviteCodes.length > 0 && (
+        <table className="tbl">
+          <thead><tr><th>Codigo</th><th>Estado</th><th>Usado por</th><th>Fecha</th><th></th></tr></thead>
+          <tbody>
+            {inviteCodes.map(c => {
+              const usedByUser = c.used_by ? adminUsers.find(u => u.id === c.used_by) : null
+              return (
+                <tr key={c.id}>
+                  <td className="mono" style={{ fontWeight: 600, color: c.used_by ? "var(--text3)" : "var(--green)", letterSpacing: 1 }}>{c.code}</td>
+                  <td><span className={`tag ${c.used_by ? "tgr" : "tg"}`}>{c.used_by ? "Usado" : "Disponible"}</span></td>
+                  <td className="mono" style={{ fontSize: 11 }}>{usedByUser ? usedByUser.username : "-"}</td>
+                  <td className="mono" style={{ fontSize: 10, color: "var(--text3)" }}>{c.used_at ? new Date(c.used_at).toLocaleDateString() : new Date(c.created_at).toLocaleDateString()}</td>
+                  <td>{!c.used_by && <button className="btn bd bx" onClick={() => deleteInviteCode(c.id)}>✕</button>}</td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      )}
+      {inviteCodes.length === 0 && <div className="em">No hay codigos. Genera uno para invitar usuarios.</div>}
     </div>
 
     {/* View any user's stats */}
