@@ -1386,13 +1386,23 @@ function MainApp({ user, onLogout }) {
   const adminDeleteUser = async (userId, username) => {
     if (username === "admin") return alert("No puedes borrar admin")
     if (!confirm(`Borrar usuario "${username}" y TODOS sus trades?`)) return
-    if (!confirm("CONFIRMAR: Esto es permanente.")) return
-    await supa(`trades?user_id=eq.${userId}`, { method: "DELETE" })
-    await supa(`shares?owner_id=eq.${userId}`, { method: "DELETE" })
-    await supa(`shares?shared_with=eq.${userId}`, { method: "DELETE" })
-    await supa(`users?id=eq.${userId}`, { method: "DELETE" })
-    await loadAdminUsers()
-    alert("Usuario borrado")
+    const typed = prompt("Escribe BORRAR para confirmar:")
+    if (typed !== "BORRAR") return alert("Cancelado")
+    try {
+      await supa(`trades?user_id=eq.${userId}`, { method: "DELETE" })
+      await supa(`shares?owner_id=eq.${userId}`, { method: "DELETE" })
+      await supa(`shares?shared_with=eq.${userId}`, { method: "DELETE" })
+      await supa(`public_links?user_id=eq.${userId}`, { method: "DELETE" })
+      await supa(`invite_codes?used_by=eq.${userId}`, { method: "PATCH", body: JSON.stringify({ used_by: null, used_at: null }) })
+      const res = await supa(`users?id=eq.${userId}`, { method: "DELETE" })
+      const data = await res.json()
+      if (res.ok) {
+        await loadAdminUsers()
+        alert("Usuario borrado correctamente")
+      } else {
+        alert("Error al borrar: " + JSON.stringify(data))
+      }
+    } catch (e) { alert("Error: " + e.message) }
   }
 
   const adminViewUserTrades = async (userId, mode) => {
@@ -1561,11 +1571,12 @@ function MainApp({ user, onLogout }) {
 
   const deleteAll = async () => {
     if (!trades.length) return
-    if (!confirm(`Borrar ${trades.length} trades?`)) return
-    if (!confirm("CONFIRMAR: Esto es permanente.")) return
+    if (!confirm(`⚠️ Vas a borrar ${trades.length} trades de ${modeLabel}.\n\nEsto NO borra tu cuenta, solo los trades.\n\n¿Continuar?`)) return
+    const typed = prompt(`Para confirmar, escribe BORRAR (en mayusculas):`)
+    if (typed !== "BORRAR") { alert("Cancelado. No se borró nada."); return }
     setSaving(true)
-    try { await supa(`trades?user_id=eq.${user.id}&mode=eq.${appMode}`, { method: "DELETE" }); await loadTrades() }
-    catch { }
+    try { await supa(`trades?user_id=eq.${user.id}&mode=eq.${appMode}`, { method: "DELETE" }); await loadTrades(); alert("Trades borrados.") }
+    catch { alert("Error al borrar") }
     finally { setSaving(false) }
   }
 
