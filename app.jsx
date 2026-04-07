@@ -2577,7 +2577,7 @@ function MainApp({ user, onLogout }) {
                   <td><span className={`tag ${c.used_by ? "tgr" : "tg"}`}>{c.used_by ? "Usado" : "Disponible"}</span></td>
                   <td className="mono" style={{ fontSize: 11 }}>{usedByUser ? usedByUser.username : "-"}</td>
                   <td className="mono" style={{ fontSize: 10, color: "var(--text3)" }}>{c.used_at ? new Date(c.used_at).toLocaleDateString() : new Date(c.created_at).toLocaleDateString()}</td>
-                  <td>{!c.used_by && <button className="btn bd bx" onClick={() => deleteInviteCode(c.id)}>✕</button>}</td>
+                  <td><button className="btn bd bx" onClick={() => deleteInviteCode(c.id)}>✕</button></td>
                 </tr>
               )
             })}
