@@ -1577,14 +1577,16 @@ function MainApp({ user, onLogout }) {
     if (fS !== "all") ft = ft.filter(t => t.setup === fS)
     if (fd1) ft = ft.filter(t => t.fecha >= fd1)
     if (fd2) ft = ft.filter(t => t.fecha <= fd2)
-    if (fN) ft = ft.slice(0, parseInt(fN) || ft.length)
     if (fP !== "all") {
       const now = new Date()
       if (fP === "week") { const w = new Date(now - 7 * 864e5); ft = ft.filter(t => safeDate(t.fecha) >= w) }
       else if (fP === "month") ft = ft.filter(t => { const d = safeDate(t.fecha); return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear() })
       else if (fP === "year") ft = ft.filter(t => safeDate(t.fecha).getFullYear() === now.getFullYear())
     }
-    return ft.sort((a, b) => safeDate(b.fecha) - safeDate(a.fecha))
+    ft = ft.sort((a, b) => safeDate(b.fecha) - safeDate(a.fecha))
+    // N trades filter — applied last so it gets the N most recent
+    if (fN && parseInt(fN) > 0) ft = ft.slice(0, parseInt(fN))
+    return ft
   }, [trades, fP, fS, fN, fd1, fd2])
 
   const stats = useMemo(() => cS(filtered), [filtered])
@@ -1645,7 +1647,7 @@ function MainApp({ user, onLogout }) {
 
   // ── Filters bar ──
   const Filters = () => (
-    <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+    <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "flex-end" }}>
       <select className="inp" style={{ width: "auto" }} value={fS} onChange={e => setFS(e.target.value)}>
         <option value="all">All</option>
         {SR.map(s => <option key={s} value={s}>{s}</option>)}
@@ -1659,7 +1661,11 @@ function MainApp({ user, onLogout }) {
       </div>
       <DatePick value={fd1} onChange={v => { if (fd2 && v && v > fd2) { setFd1(fd2); setFd2(v); const dd = new Date(v + "T12:00:00"); setCM(dd.getMonth()); setCY(dd.getFullYear()) } else { setFd1(v); if (v) { const dd = new Date(v + "T12:00:00"); setCM(dd.getMonth()); setCY(dd.getFullYear()) } } }} label="Desde" compact />
       <DatePick value={fd2} onChange={v => { if (fd1 && v && v < fd1) { setFd2(fd1); setFd1(v); const dd = new Date(v + "T12:00:00"); setCM(dd.getMonth()); setCY(dd.getFullYear()) } else setFd2(v) }} label="Hasta" compact />
-      {(fd1 || fd2 || fS !== "all" || fP !== "all") && <button className="btn bo bx" style={{ fontSize: 10, marginTop: 14 }} onClick={() => { setFd1(""); setFd2(""); setFS("all"); setFP("all"); setFN(""); setCM(new Date().getMonth()); setCY(new Date().getFullYear()) }}>Reset</button>}
+      <div className="field" style={{ gap: 3 }}>
+        <label style={{ fontSize: 8 }}>N trades</label>
+        <input className="inp" type="number" min="1" style={{ width: 60, fontSize: 11, padding: "6px 4px" }} value={fN} onChange={e => setFN(e.target.value)} placeholder="Ult" />
+      </div>
+      {(fd1 || fd2 || fS !== "all" || fP !== "all" || fN) && <button className="btn bo bx" style={{ fontSize: 10 }} onClick={() => { setFd1(""); setFd2(""); setFS("all"); setFP("all"); setFN(""); setCM(new Date().getMonth()); setCY(new Date().getFullYear()) }}>Reset</button>}
     </div>
   )
 
@@ -1784,7 +1790,7 @@ function MainApp({ user, onLogout }) {
     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 16, flexWrap: "wrap", gap: 10 }}>
       <div>
         <h1 className="pt">Dashboard <span style={{ fontSize: 16, fontFamily: "var(--mono)", color: accentColor, fontWeight: 600 }}>{modeLabel}</span></h1>
-        <p className="ps">{rT(trades).length} trades | 1R={fmt$(RV)}</p>
+        <p className="ps">{stats.total} trades{stats.total !== rT(trades).length ? ` de ${rT(trades).length}` : ""} | 1R={fmt$(RV)}</p>
       </div>
       <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "flex-start" }}>
         <Filters />
