@@ -343,6 +343,67 @@ function slAnalysis(trades) {
     .filter(x => x.total > 0)
 }
 
+function beAnalysis(trades) {
+  const bes = rT(trades).filter(t => t.resultado === "BE")
+  if (!bes.length) return null
+
+  const withRmax = bes.map(t => ({ ...t, rmx: pn(t.rMaximo) })).filter(t => t.rmx > 0)
+  if (!withRmax.length) return { total: bes.length, withData: 0, buckets: [], totalMissed: 0, avgMissed: 0, worstMissed: null, bySetup: [] }
+
+  // Buckets: how far did BE trades go before coming back
+  const buckets = [
+    { label: "< 0.5R", min: 0, max: 0.5 },
+    { label: "0.5-1R", min: 0.5, max: 1 },
+    { label: "1-1.5R", min: 1, max: 1.5 },
+    { label: "1.5-2R", min: 1.5, max: 2 },
+    { label: "2-3R", min: 2, max: 3 },
+    { label: "3-5R", min: 3, max: 5 },
+    { label: "5R+", min: 5, max: 999 }
+  ].map(b => {
+    const inBucket = withRmax.filter(t => t.rmx >= b.min && t.rmx < b.max)
+    return { ...b, count: inBucket.length, pct: Math.round(inBucket.length / withRmax.length * 10000) / 100 }
+  }).filter(b => b.count > 0)
+
+  // Total R left on table
+  const totalMissed = Math.round(withRmax.reduce((a, t) => a + t.rmx, 0) * 100) / 100
+  const avgMissed = Math.round(totalMissed / withRmax.length * 100) / 100
+
+  // Worst BE (highest rMax that ended BE)
+  const worst = withRmax.reduce((a, t) => t.rmx > a.rmx ? t : a, withRmax[0])
+
+  // BE by setup
+  const setupMap = {}
+  withRmax.forEach(t => {
+    const s = t.setup || "?"
+    if (!setupMap[s]) setupMap[s] = { count: 0, totalR: 0 }
+    setupMap[s].count++
+    setupMap[s].totalR += t.rmx
+  })
+  const bySetup = Object.entries(setupMap).map(([s, d]) => ({
+    setup: s, count: d.count, totalR: Math.round(d.totalR * 100) / 100, avgR: Math.round(d.totalR / d.count * 100) / 100
+  })).sort((a, b) => b.totalR - a.totalR)
+
+  // BE by hour
+  const hourMap = {}
+  withRmax.forEach(t => {
+    const h = hBucket(t.horaInicio)
+    if (!h) return
+    if (!hourMap[h]) hourMap[h] = { count: 0, totalR: 0 }
+    hourMap[h].count++
+    hourMap[h].totalR += t.rmx
+  })
+  const byHour = Object.entries(hourMap).map(([h, d]) => ({
+    hour: h, count: d.count, totalR: Math.round(d.totalR * 100) / 100, avgR: Math.round(d.totalR / d.count * 100) / 100
+  })).sort((a, b) => b.totalR - a.totalR)
+
+  return {
+    total: bes.length, withData: withRmax.length, buckets,
+    totalMissed, avgMissed, totalMissedDollar: Math.round(totalMissed * RV),
+    worstMissed: worst ? { fecha: worst.fecha, rmax: worst.rmx, setup: worst.setup } : null,
+    bySetup, byHour
+  }
+}
+
 function genTips(trades) {
   const t2 = rT(trades)
   if (t2.length < 5) return []
@@ -2377,6 +2438,7 @@ function MainApp({ user, onLogout }) {
   const hStats = useMemo(() => hourAnalysis(filtered), [filtered])
   const atrStats = useMemo(() => atrAnalysis(filtered), [filtered])
   const slStats = useMemo(() => slAnalysis(filtered), [filtered])
+  const beStats = useMemo(() => beAnalysis(filtered), [filtered])
   const tipsData = useMemo(() => genTips(filtered), [filtered])
 
   const isSinOpForm = isSO(form)
@@ -3057,6 +3119,94 @@ function MainApp({ user, onLogout }) {
         ) : <div className="em">-</div>}
       </div>
     </div>
+
+    {/* ── BE ANALYSIS: Dinero sobre la mesa ── */}
+    {beStats && beStats.withData > 0 && (
+      <div className="card" style={{ marginTop: 14, borderLeft: "3px solid var(--yellow)" }}>
+        <div className="st" style={{ color: "var(--yellow)" }}>💰 Análisis BE — Dinero sobre la mesa</div>
+
+        {/* Summary metrics */}
+        <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 16 }}>
+          <div style={{ background: "var(--bg)", borderRadius: 8, padding: "10px 16px", textAlign: "center" }}>
+            <div className="ml">Total BE</div>
+            <div style={{ fontFamily: "var(--mono)", fontWeight: 700, fontSize: 22, color: "var(--yellow)" }}>{beStats.total}</div>
+          </div>
+          <div style={{ background: "var(--bg)", borderRadius: 8, padding: "10px 16px", textAlign: "center" }}>
+            <div className="ml">R dejados</div>
+            <div style={{ fontFamily: "var(--mono)", fontWeight: 700, fontSize: 22, color: "var(--yellow)" }}>+{beStats.totalMissed}R</div>
+            <div className="ms">{fmt$(beStats.totalMissedDollar)}</div>
+          </div>
+          <div style={{ background: "var(--bg)", borderRadius: 8, padding: "10px 16px", textAlign: "center" }}>
+            <div className="ml">Promedio por BE</div>
+            <div style={{ fontFamily: "var(--mono)", fontWeight: 700, fontSize: 22, color: "var(--yellow)" }}>+{beStats.avgMissed}R</div>
+            <div className="ms">{fmt$(Math.round(beStats.avgMissed * RV))}/trade</div>
+          </div>
+          {beStats.worstMissed && (
+            <div style={{ background: "var(--bg)", borderRadius: 8, padding: "10px 16px", textAlign: "center" }}>
+              <div className="ml">Peor BE</div>
+              <div style={{ fontFamily: "var(--mono)", fontWeight: 700, fontSize: 22, color: "var(--red)" }}>+{beStats.worstMissed.rmax}R</div>
+              <div className="ms">{fmtD(beStats.worstMissed.fecha)} ({beStats.worstMissed.setup})</div>
+            </div>
+          )}
+        </div>
+
+        {/* Distribution chart */}
+        <div style={{ marginBottom: 16 }}>
+          <div style={{ fontSize: 11, color: "var(--text2)", marginBottom: 8, fontFamily: "var(--mono)" }}>¿Cuánto recorrieron los BE antes de volver?</div>
+          <BC data={beStats.buckets.map(b => b.count)} labels={beStats.buckets.map(b => b.label)} height={100} unit="" colors={beStats.buckets.map(b => b.max <= 1 ? "var(--text3)" : b.max <= 2 ? "var(--yellow)" : "var(--red)")} />
+        </div>
+
+        <div className="g2">
+          {/* By setup */}
+          {beStats.bySetup.length > 0 && (
+            <div>
+              <div style={{ fontSize: 11, color: "var(--text2)", marginBottom: 6, fontFamily: "var(--mono)" }}>BE por Setup (R dejados)</div>
+              <table className="tbl">
+                <thead><tr><th>Setup</th><th>BEs</th><th>R dejados</th><th>Prom</th></tr></thead>
+                <tbody>{beStats.bySetup.map(s2 => (
+                  <tr key={s2.setup}>
+                    <td><STag s={s2.setup} /></td>
+                    <td className="mono">{s2.count}</td>
+                    <td className="mono bold" style={{ color: "var(--yellow)" }}>+{s2.totalR}R</td>
+                    <td className="mono" style={{ color: "var(--text2)" }}>{s2.avgR}R</td>
+                  </tr>
+                ))}</tbody>
+              </table>
+            </div>
+          )}
+
+          {/* By hour */}
+          {beStats.byHour.length > 0 && (
+            <div>
+              <div style={{ fontSize: 11, color: "var(--text2)", marginBottom: 6, fontFamily: "var(--mono)" }}>BE por Hora (R dejados)</div>
+              <table className="tbl">
+                <thead><tr><th>Hora</th><th>BEs</th><th>R dejados</th><th>Prom</th></tr></thead>
+                <tbody>{beStats.byHour.map(h => (
+                  <tr key={h.hour}>
+                    <td className="mono bold">{h.hour}</td>
+                    <td className="mono">{h.count}</td>
+                    <td className="mono bold" style={{ color: "var(--yellow)" }}>+{h.totalR}R</td>
+                    <td className="mono" style={{ color: "var(--text2)" }}>{h.avgR}R</td>
+                  </tr>
+                ))}</tbody>
+              </table>
+            </div>
+          )}
+        </div>
+
+        {/* Insight */}
+        <div style={{ marginTop: 14, padding: "10px 14px", background: "rgba(255,192,72,.06)", borderRadius: 8, fontSize: 12, color: "var(--text2)" }}>
+          💡 {beStats.totalMissed > beStats.total ? (
+            <span>Si hubieras capturado solo <b style={{ color: "var(--yellow)" }}>1R</b> en cada BE, habrías ganado <b style={{ color: "var(--green)" }}>+{beStats.withData}R ({fmt$(beStats.withData * RV)})</b> extra.</span>
+          ) : (
+            <span>La mayoría de tus BE no llegaron lejos. Tu gestión de trailing está funcionando razonablemente.</span>
+          )}
+          {beStats.bySetup.length > 1 && beStats.bySetup[0].totalR > beStats.bySetup[1].totalR * 2 && (
+            <span> El setup <b style={{ color: "var(--yellow)" }}>{beStats.bySetup[0].setup}</b> es donde más R dejas sobre la mesa.</span>
+          )}
+        </div>
+      </div>
+    )}
   </>
 )}
 
