@@ -1978,15 +1978,10 @@ function MainApp({ user, onLogout }) {
   const [publicLink, setPublicLink] = useState("")
   const [selectMode, setSelectMode] = useState(false)
   const [selectedTradeIds, setSelectedTradeIds] = useState(new Set())
-  const [chatOpen, setChatOpen] = useState(false)
-  const [chatMsgs, setChatMsgs] = useState([])
-  const [chatInput, setChatInput] = useState("")
-  const [chatLoading, setChatLoading] = useState(false)
-  const [chatApiKey] = useState("AIzaSyAfyK-r-D73KLQXsALCRiSXkbQg2SS7Y_k")
-  const [chatPos, setChatPos] = useState({ x: null, y: null })
-  const [chatDragging, setChatDragging] = useState(false)
-  const chatDragOffset = useRef({ x: 0, y: 0 })
-  const chatEndRef = useRef(null)
+  const [analyzerOpen, setAnalyzerOpen] = useState(false)
+  const [analyzerResult, setAnalyzerResult] = useState(null)
+  const [analyzerPos, setAnalyzerPos] = useState({ x: null, y: null })
+  const analyzerDragOffset = useRef({ x: 0, y: 0 })
   const fileRef = useRef()
 
   // Team state
@@ -2256,100 +2251,148 @@ function MainApp({ user, onLogout }) {
     finally { setSaving(false) }
   }
 
-  // ── AI Chat ──
-  const buildChatContext = () => {
-    const s = cS(filtered)
-    const ex = extraS(filtered)
+  // ── Local Analyzer ──
+  const runAnalysis = (type) => {
+    const s = stats
+    const ex = extra
     const be = beAnalysis(filtered)
+    const ha = hourAnalysis(filtered)
     const mo = grpBy(trades, t => getMo(t.fecha))
     const dy = grpBy(trades, t => t.fecha)
+    const t2 = rT(filtered)
+    let title = "", lines = []
 
-    let ctx = `MODO: ${modeLabel}\nFILTROS ACTIVOS: ${fP !== "all" ? fP : "ninguno"}${fS !== "all" ? ", setup=" + fS : ""}${fd1 ? ", desde=" + fd1 : ""}${fd2 ? ", hasta=" + fd2 : ""}\n\n`
-    ctx += `ESTADISTICAS GENERALES:\nTrades: ${s.total} | Win%: ${s.winRate.toFixed(2)}% | P&L: ${s.totalR}R (${fmt$(s.totalDollar)}) | PF: ${fmtPF(s.profitFactor)} | Expectancy: ${s.expectancy}R | Sharpe: ${s.sharpeRatio.toFixed(2)} | Recovery: ${s.recoveryFactor === Infinity ? "∞" : s.recoveryFactor.toFixed(2)} | Payoff: ${s.payoffRatio === Infinity ? "∞" : s.payoffRatio.toFixed(2)}\n`
-    ctx += `Wins: ${s.wins} | Losses: ${s.losses} | BEs: ${s.bes} | Racha WIN: ${s.maxWinStreak} | Racha LOSS: ${s.maxLossStreak} | Max DD: ${s.maxEquityDD}R\n`
-    ctx += `Mejor dia: ${ex.bestDay} | Peor dia: ${ex.worstDay} | Ops/dia: ${ex.avgOps} | Mejor dia sem: ${ex.bestWd} | Peor dia sem: ${ex.worstWd}\n`
-    ctx += `Dur promedio WIN: ${s.avgDurWin}min | SL: ${s.avgDurSL}min | BE: ${s.avgDurBE}min\n\n`
-
-    if (be && be.withData > 0) {
-      ctx += `ANALISIS BE:\nTotal BE: ${be.total} | R dejados: ${be.totalMissed}R (${fmt$(be.totalMissedDollar)}) | Promedio: ${be.avgMissed}R/trade\n`
-      if (be.worstMissed) ctx += `Peor BE: ${be.worstMissed.rmax}R el ${be.worstMissed.fecha} (${be.worstMissed.setup})\n`
-      if (be.bySetup.length) ctx += `BE por setup: ${be.bySetup.map(s2 => `${s2.setup}:${s2.count}BE/${s2.totalR}R`).join(", ")}\n`
-      ctx += "\n"
+    if (type === "resumen") {
+      title = "📊 Resumen General"
+      lines.push(`Modo: ${modeLabel} | ${s.total} trades analizados`)
+      lines.push("")
+      if (s.total === 0) { lines.push("No hay trades para analizar."); setAnalyzerResult({ title, lines }); return }
+      lines.push(`P&L: ${s.totalR >= 0 ? "+" : ""}${s.totalR}R (${fmt$(s.totalDollar)})`)
+      lines.push(`Win Rate: ${s.winRate.toFixed(2)}% (${s.wins}W / ${s.losses}L / ${s.bes}BE)`)
+      lines.push(`Profit Factor: ${fmtPF(s.profitFactor)} | Expectancy: ${s.expectancy}R (${fmt$(s.expectDollar)}/trade)`)
+      lines.push(`Sharpe: ${s.sharpeRatio.toFixed(2)} | Recovery: ${s.recoveryFactor === Infinity ? "∞" : s.recoveryFactor.toFixed(2)} | Payoff: ${s.payoffRatio === Infinity ? "∞" : s.payoffRatio.toFixed(2)}`)
+      lines.push("")
+      lines.push(`Racha WIN: ${s.maxWinStreak} | Racha LOSS: ${s.maxLossStreak} | Max DD: ${s.maxEquityDD}R`)
+      lines.push(`Dur promedio → WIN: ${s.avgDurWin}min | SL: ${s.avgDurSL}min | BE: ${s.avgDurBE}min`)
+      lines.push("")
+      if (s.winRate >= 50 && s.profitFactor >= 1.5) lines.push("✅ Estadísticas sólidas. Mantén la disciplina.")
+      else if (s.winRate >= 40 && s.profitFactor >= 1) lines.push("⚠️ Rentable pero ajustado. Busca mejorar el payoff ratio.")
+      else lines.push("🔴 Necesitas ajustes. Revisa tus setups y gestión de riesgo.")
+      if (s.bes > s.wins) lines.push(`⚠️ Tienes más BEs (${s.bes}) que WINs (${s.wins}). Revisa tu trailing stop.`)
     }
 
-    ctx += `RENDIMIENTO MENSUAL:\n`
-    mo.slice(0, 6).forEach(m => { ctx += `${m.key}: ${m.totalR}R (${m.total}t, ${m.winRate.toFixed(1)}%WR)\n` })
-    ctx += "\n"
-
-    ctx += `ULTIMOS 10 DIAS:\n`
-    dy.slice(0, 10).forEach(d => { ctx += `${d.key}: ${d.totalR}R (${d.total}t)\n` })
-    ctx += "\n"
-
-    // Setup breakdown
-    const sr2 = SR.map(su => {
-      const ss = cS(trades.filter(t => t.setup === su))
-      return ss.total > 0 ? `${su}: ${ss.total}t, ${ss.winRate.toFixed(1)}%WR, ${ss.totalR}R, PF:${fmtPF(ss.profitFactor)}` : null
-    }).filter(Boolean)
-    if (sr2.length) ctx += `POR SETUP:\n${sr2.join("\n")}\n\n`
-
-    // Last 20 trades detail
-    ctx += `ULTIMOS 20 TRADES:\n`
-    filtered.slice(0, 20).forEach(t => {
-      const r = gR(t)
-      ctx += `${t.fecha} ${t.horaInicio} ${t.setup} ${t.buySell} ${t.resultado} ${r > 0 ? "+" : ""}${r}R rMax:${t.rMaximo || "-"} ${t.direccionDia} ${t.accountName || ""}\n`
-    })
-
-    return ctx
-  }
-
-  const sendChat = async () => {
-    if (!chatInput.trim() || chatLoading) return
-    if (!chatApiKey) return
-    const userMsg = chatInput.trim()
-    setChatInput("")
-    setChatMsgs(prev => [...prev, { role: "user", text: userMsg }])
-    setChatLoading(true)
-
-    try {
-      const context = buildChatContext()
-      const systemPrompt = `Eres un coach de trading experto que analiza el journal de un trader. Tienes acceso a sus estadisticas y trades. Responde en español, se directo y conciso. Usa datos especificos de sus stats para dar consejos accionables. Si te preguntan algo que no esta en los datos, dilo. No inventes datos. Usa emojis con moderacion. El valor de 1R es $${RV}.`
-
-      const messages = [
-        ...chatMsgs.filter(m => m.role === "user" || m.role === "assistant").slice(-8).map(m => ({
-          role: m.role === "user" ? "user" : "assistant",
-          content: m.text
-        })),
-        { role: "user", content: `[DATOS DEL JOURNAL]\n${context}\n\n[PREGUNTA]\n${userMsg}` }
-      ]
-
-      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${chatApiKey}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          system_instruction: { parts: [{ text: systemPrompt }] },
-          contents: messages.map(m => ({
-            role: m.role === "assistant" ? "model" : "user",
-            parts: [{ text: m.content }]
-          }))
-        })
+    else if (type === "be") {
+      title = "💰 Análisis de BEs — Dinero sobre la mesa"
+      if (!be || be.withData === 0) { lines.push("No hay BEs con R máximo registrado."); setAnalyzerResult({ title, lines }); return }
+      lines.push(`Total BEs: ${be.total} | Con data de R max: ${be.withData}`)
+      lines.push(`R dejados sobre la mesa: +${be.totalMissed}R (${fmt$(be.totalMissedDollar)})`)
+      lines.push(`Promedio por BE: +${be.avgMissed}R (${fmt$(Math.round(be.avgMissed * RV))})`)
+      lines.push("")
+      if (be.worstMissed) lines.push(`🔴 Peor BE: +${be.worstMissed.rmax}R el ${fmtD(be.worstMissed.fecha)} (${be.worstMissed.setup})`)
+      lines.push("")
+      lines.push("Distribución de R máximo en BEs:")
+      be.buckets.forEach(b => {
+        const bar = "█".repeat(Math.max(1, Math.round(b.pct / 5)))
+        lines.push(`  ${b.label.padEnd(8)} ${bar} ${b.count} (${b.pct}%)`)
       })
-
-      const data = await res.json()
-      if (data.error) {
-        setChatMsgs(prev => [...prev, { role: "assistant", text: "Error: " + (data.error.message || JSON.stringify(data.error)) }])
-      } else {
-        const reply = data.candidates && data.candidates[0] && data.candidates[0].content
-          ? data.candidates[0].content.parts.map(p => p.text || "").join("")
-          : "Sin respuesta"
-        setChatMsgs(prev => [...prev, { role: "assistant", text: reply }])
+      lines.push("")
+      if (be.bySetup.length) {
+        lines.push("Por Setup:")
+        be.bySetup.forEach(s2 => lines.push(`  ${s2.setup}: ${s2.count} BEs, +${s2.totalR}R dejados (prom ${s2.avgR}R)`))
       }
-    } catch (e) {
-      setChatMsgs(prev => [...prev, { role: "assistant", text: "Error de conexión: " + e.message }])
+      lines.push("")
+      const bigBEs = be.buckets.filter(b => b.min >= 2).reduce((a, b2) => a + b2.count, 0)
+      if (bigBEs > 0) lines.push(`🔴 ${bigBEs} BEs pasaron de 2R. Ahí estás dejando dinero real.`)
+      if (be.totalMissed > be.withData) lines.push(`💡 Si capturaras solo 1R en cada BE, ganarías +${be.withData}R (${fmt$(be.withData * RV)}) extra.`)
     }
-    finally { setChatLoading(false) }
-  }
 
-  useEffect(() => { if (chatEndRef.current) chatEndRef.current.scrollIntoView({ behavior: "smooth" }) }, [chatMsgs])
+    else if (type === "hora") {
+      title = "🕐 Análisis por Hora"
+      if (!ha.length) { lines.push("No hay data por hora."); setAnalyzerResult({ title, lines }); return }
+      const best = ha.reduce((a, x) => x.totalR > a.totalR ? x : a, ha[0])
+      const worst = ha.reduce((a, x) => x.totalR < a.totalR ? x : a, ha[0])
+      lines.push("Hora      Trades  Win%    R Total  PF")
+      lines.push("─".repeat(46))
+      ha.forEach(h => {
+        const flag = h === best ? " ✅" : h === worst && h.totalR < 0 ? " 🔴" : ""
+        lines.push(`${h.hour.padEnd(10)}${String(h.total).padEnd(8)}${(h.winRate.toFixed(1) + "%").padEnd(8)}${((h.totalR >= 0 ? "+" : "") + h.totalR + "R").padEnd(10)}${fmtPF(h.profitFactor)}${flag}`)
+      })
+      lines.push("")
+      if (best.total >= 3) lines.push(`✅ Mejor hora: ${best.hour} → ${best.winRate.toFixed(1)}%WR, +${best.totalR}R`)
+      if (worst.total >= 3 && worst.totalR < 0) lines.push(`🔴 Peor hora: ${worst.hour} → ${worst.winRate.toFixed(1)}%WR, ${worst.totalR}R`)
+      const profitable = ha.filter(h => h.totalR > 0 && h.total >= 2)
+      if (profitable.length) lines.push(`💡 Horas rentables: ${profitable.map(h => h.hour).join(", ")}`)
+    }
+
+    else if (type === "setups") {
+      title = "◆ Comparación de Setups"
+      lines.push("Setup  Trades  Win%    R Total  PF      Exp")
+      lines.push("─".repeat(52))
+      SR.forEach(su => {
+        const ss = cS(trades.filter(t => t.setup === su))
+        if (ss.total === 0) return
+        lines.push(`${su.padEnd(7)}${String(ss.total).padEnd(8)}${(ss.winRate.toFixed(1) + "%").padEnd(8)}${((ss.totalR >= 0 ? "+" : "") + ss.totalR + "R").padEnd(10)}${fmtPF(ss.profitFactor).padEnd(8)}${ss.expectancy}R`)
+      })
+      lines.push("")
+      const allSetups = SR.map(su => ({ su, ...cS(trades.filter(t => t.setup === su)) })).filter(x => x.total >= 3)
+      if (allSetups.length) {
+        const bestS = allSetups.reduce((a, x) => x.expectancy > a.expectancy ? x : a, allSetups[0])
+        const worstS = allSetups.reduce((a, x) => x.expectancy < a.expectancy ? x : a, allSetups[0])
+        lines.push(`✅ Mejor setup: ${bestS.su} (${bestS.expectancy}R exp, ${bestS.winRate.toFixed(1)}%WR)`)
+        if (worstS.expectancy < 0) lines.push(`🔴 Peor setup: ${worstS.su} (${worstS.expectancy}R exp) — considera eliminarlo`)
+      }
+    }
+
+    else if (type === "tendencia") {
+      title = "📈 Tendencia Reciente"
+      const last10 = dy.slice(0, 10)
+      const prev10 = dy.slice(10, 20)
+      if (!last10.length) { lines.push("No hay suficientes datos."); setAnalyzerResult({ title, lines }); return }
+      const r10 = Math.round(last10.reduce((a, d) => a + d.totalR, 0) * 100) / 100
+      const wr10 = last10.length ? Math.round(last10.reduce((a, d) => a + d.wins, 0) / last10.reduce((a, d) => a + d.total, 0) * 10000) / 100 : 0
+      lines.push("Últimos 10 días de trading:")
+      last10.forEach(d => {
+        const emoji = d.totalR > 0 ? "🟢" : d.totalR < 0 ? "🔴" : "🟡"
+        lines.push(`  ${emoji} ${d.key}: ${d.totalR >= 0 ? "+" : ""}${d.totalR}R (${d.total}t, ${d.winRate.toFixed(0)}%WR)`)
+      })
+      lines.push("")
+      lines.push(`Total últimos 10 días: ${r10 >= 0 ? "+" : ""}${r10}R | Win%: ${wr10}%`)
+      if (prev10.length) {
+        const rPrev = Math.round(prev10.reduce((a, d) => a + d.totalR, 0) * 100) / 100
+        lines.push(`10 días anteriores: ${rPrev >= 0 ? "+" : ""}${rPrev}R`)
+        if (r10 > rPrev) lines.push("✅ Tendencia mejorando")
+        else if (r10 < rPrev) lines.push("⚠️ Tendencia empeorando")
+        else lines.push("➡️ Tendencia estable")
+      }
+      // Win/loss streak check
+      const recent = last10.slice(0, 5)
+      const allGreen = recent.every(d => d.totalR >= 0)
+      const allRed = recent.every(d => d.totalR < 0)
+      if (allGreen) lines.push("🔥 5 días seguidos en positivo. Buen momento.")
+      if (allRed) lines.push("🧊 5 días seguidos en negativo. Considera pausar y revisar.")
+    }
+
+    else if (type === "mensual") {
+      title = "📅 Rendimiento Mensual"
+      if (!mo.length) { lines.push("No hay data mensual."); setAnalyzerResult({ title, lines }); return }
+      lines.push("Mes        Trades  Win%    R Total  PF")
+      lines.push("─".repeat(48))
+      mo.forEach(m => {
+        const emoji = m.totalR > 0 ? "🟢" : m.totalR < 0 ? "🔴" : "🟡"
+        lines.push(`${emoji} ${m.key.padEnd(9)}${String(m.total).padEnd(8)}${(m.winRate.toFixed(1) + "%").padEnd(8)}${((m.totalR >= 0 ? "+" : "") + m.totalR + "R").padEnd(10)}${fmtPF(m.profitFactor)}`)
+      })
+      lines.push("")
+      const greenMonths = mo.filter(m => m.totalR > 0).length
+      const totalMonths = mo.length
+      lines.push(`Meses verdes: ${greenMonths}/${totalMonths} (${Math.round(greenMonths / totalMonths * 100)}%)`)
+      const bestM = mo.reduce((a, x) => x.totalR > a.totalR ? x : a, mo[0])
+      const worstM = mo.reduce((a, x) => x.totalR < a.totalR ? x : a, mo[0])
+      lines.push(`✅ Mejor mes: ${bestM.key} (+${bestM.totalR}R)`)
+      if (worstM.totalR < 0) lines.push(`🔴 Peor mes: ${worstM.key} (${worstM.totalR}R)`)
+    }
+
+    setAnalyzerResult({ title, lines })
+  }
   const edit = t => { setForm({ ...DFT, ...t }); setEditId(t.id); setTab("addTrade") }
   const goTab = t => { setTab(t); if (window.innerWidth <= 900) setSb(false); if (t === "addTrade" && !editId) setForm({ ...DFT }) }
 
@@ -3732,93 +3775,90 @@ function MainApp({ user, onLogout }) {
 
       </div>
 
-      {/* ── AI Chat floating button ── */}
-      <div onClick={() => setChatOpen(!chatOpen)}
-        style={{ position: "fixed", bottom: 24, right: 24, width: 52, height: 52, borderRadius: "50%", background: "var(--accent)", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", boxShadow: "0 4px 20px rgba(76,154,255,.4)", zIndex: 998, fontSize: 22, transition: "transform .2s", transform: chatOpen ? "rotate(45deg)" : "none" }}>
-        {chatOpen ? "+" : "🤖"}
+      {/* ── Analyzer floating button ── */}
+      <div onClick={() => setAnalyzerOpen(!analyzerOpen)}
+        style={{ position: "fixed", bottom: 24, right: 24, width: 52, height: 52, borderRadius: "50%", background: "var(--accent)", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", boxShadow: "0 4px 20px rgba(76,154,255,.4)", zIndex: 998, fontSize: 22, transition: "transform .2s", transform: analyzerOpen ? "rotate(45deg)" : "none" }}>
+        {analyzerOpen ? "+" : "📊"}
       </div>
 
-      {/* ── AI Chat panel (draggable) ── */}
-      {chatOpen && (
+      {/* ── Analyzer panel (draggable) ── */}
+      {analyzerOpen && (
         <div style={{
           position: "fixed",
-          bottom: chatPos.y !== null ? "auto" : 88,
-          right: chatPos.x !== null ? "auto" : 24,
-          top: chatPos.y !== null ? chatPos.y : "auto",
-          left: chatPos.x !== null ? chatPos.x : "auto",
-          width: 400, maxWidth: "calc(100vw - 48px)", height: 560, maxHeight: "calc(100vh - 100px)",
+          bottom: analyzerPos.y !== null ? "auto" : 88,
+          right: analyzerPos.x !== null ? "auto" : 24,
+          top: analyzerPos.y !== null ? analyzerPos.y : "auto",
+          left: analyzerPos.x !== null ? analyzerPos.x : "auto",
+          width: 420, maxWidth: "calc(100vw - 48px)", height: 580, maxHeight: "calc(100vh - 100px)",
           background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 16, zIndex: 998,
           display: "flex", flexDirection: "column", boxShadow: "0 8px 40px rgba(0,0,0,.5)"
         }}>
-          {/* Chat header (drag handle) */}
+          {/* Header (drag handle) */}
           <div style={{ padding: "12px 16px", borderBottom: "1px solid var(--border)", display: "flex", justifyContent: "space-between", alignItems: "center", cursor: "grab", userSelect: "none" }}
             onMouseDown={e => {
-              setChatDragging(true)
-              const rect = e.currentTarget.closest("div[style]").parentElement.querySelector(":scope > div:last-of-type") ? e.currentTarget.parentElement.getBoundingClientRect() : e.currentTarget.parentElement.getBoundingClientRect()
               const parent = e.currentTarget.parentElement
               const pr = parent.getBoundingClientRect()
-              chatDragOffset.current = { x: e.clientX - pr.left, y: e.clientY - pr.top }
-              const onMove = ev => { setChatPos({ x: ev.clientX - chatDragOffset.current.x, y: ev.clientY - chatDragOffset.current.y }) }
-              const onUp = () => { setChatDragging(false); window.removeEventListener("mousemove", onMove); window.removeEventListener("mouseup", onUp) }
+              analyzerDragOffset.current = { x: e.clientX - pr.left, y: e.clientY - pr.top }
+              const onMove = ev => { setAnalyzerPos({ x: ev.clientX - analyzerDragOffset.current.x, y: ev.clientY - analyzerDragOffset.current.y }) }
+              const onUp = () => { window.removeEventListener("mousemove", onMove); window.removeEventListener("mouseup", onUp) }
               window.addEventListener("mousemove", onMove)
               window.addEventListener("mouseup", onUp)
             }}>
             <div>
-              <div style={{ fontFamily: "var(--mono)", fontWeight: 700, fontSize: 13, color: "var(--accent)" }}>🤖 Trading Coach AI</div>
+              <div style={{ fontFamily: "var(--mono)", fontWeight: 700, fontSize: 13, color: "var(--accent)" }}>📊 Analizador de Trading</div>
               <div style={{ fontSize: 10, color: "var(--text3)" }}>{modeLabel} • {trades.length} trades</div>
             </div>
-            <div style={{ display: "flex", gap: 6 }}>
-              <button onClick={() => setChatMsgs([])} style={{ background: "none", border: "none", color: "var(--text3)", cursor: "pointer", fontSize: 11 }} title="Limpiar chat">🗑</button>
-              <button onClick={() => { setChatPos({ x: null, y: null }); setChatOpen(false) }} style={{ background: "none", border: "none", color: "var(--text3)", cursor: "pointer", fontSize: 14 }}>✕</button>
-            </div>
+            <button onClick={() => { setAnalyzerPos({ x: null, y: null }); setAnalyzerOpen(false) }} style={{ background: "none", border: "none", color: "var(--text3)", cursor: "pointer", fontSize: 14 }}>✕</button>
           </div>
 
-          {/* Chat messages */}
-          <div style={{ flex: 1, overflowY: "auto", padding: "12px 14px", display: "flex", flexDirection: "column", gap: 10 }}>
-            {chatMsgs.length === 0 && (
-              <div style={{ textAlign: "center", padding: "20px 10px", color: "var(--text3)" }}>
-                <div style={{ fontSize: 32, marginBottom: 8 }}>🤖</div>
-                <div style={{ fontSize: 13, marginBottom: 12 }}>Pregúntame sobre tu trading</div>
-                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                  {["¿Cómo fue mi semana?", "¿Cuál es mi mejor setup?", "Analiza mis BEs", "¿A qué hora opero mejor?", "Dame un resumen general"].map(q => (
-                    <div key={q} onClick={() => { setChatInput(q) }} style={{ padding: "6px 10px", background: "var(--bg)", borderRadius: 6, fontSize: 11, color: "var(--accent)", cursor: "pointer", border: "1px solid var(--border)" }}>{q}</div>
-                  ))}
-                </div>
-              </div>
-            )}
-            {chatMsgs.map((m, i) => (
-              <div key={i} style={{ display: "flex", justifyContent: m.role === "user" ? "flex-end" : "flex-start" }}>
-                <div style={{
-                  maxWidth: "85%", padding: "8px 12px", borderRadius: 12,
-                  background: m.role === "user" ? "var(--ad)" : "var(--bg)",
-                  color: m.role === "user" ? "var(--accent)" : "var(--text)",
-                  fontSize: 12, lineHeight: 1.5, whiteSpace: "pre-wrap", wordBreak: "break-word"
-                }}>
-                  {m.text}
-                </div>
-              </div>
+          {/* Analysis buttons */}
+          <div style={{ padding: "12px 14px", borderBottom: "1px solid var(--border)", display: "flex", gap: 6, flexWrap: "wrap" }}>
+            {[
+              { id: "resumen", label: "📊 Resumen", color: "var(--accent)" },
+              { id: "be", label: "💰 BEs", color: "var(--yellow)" },
+              { id: "hora", label: "🕐 Horas", color: "var(--green)" },
+              { id: "setups", label: "◆ Setups", color: "var(--purple)" },
+              { id: "tendencia", label: "📈 Tendencia", color: "var(--accent)" },
+              { id: "mensual", label: "📅 Mensual", color: "var(--green)" }
+            ].map(b => (
+              <button key={b.id} onClick={() => runAnalysis(b.id)}
+                style={{ padding: "5px 10px", background: b.color + "15", color: b.color, border: `1px solid ${b.color}30`, borderRadius: 6, fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "var(--mono)" }}>
+                {b.label}
+              </button>
             ))}
-            {chatLoading && (
-              <div style={{ display: "flex", justifyContent: "flex-start" }}>
-                <div style={{ padding: "8px 12px", background: "var(--bg)", borderRadius: 12, fontSize: 12, color: "var(--text3)" }}>Analizando tus datos...</div>
-              </div>
-            )}
-            <div ref={chatEndRef} />
           </div>
 
-          {/* Chat input */}
-          <div style={{ padding: "10px 14px", borderTop: "1px solid var(--border)" }}>
-            <div style={{ display: "flex", gap: 8 }}>
-              <input className="inp" value={chatInput} onChange={e => setChatInput(e.target.value)}
-                onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendChat() } }}
-                placeholder="Pregunta sobre tu trading..."
-                style={{ flex: 1, fontSize: 12, padding: "8px 10px" }} />
-              <button onClick={sendChat} disabled={chatLoading || !chatInput.trim()}
-                style={{ background: "var(--accent)", color: "#fff", border: "none", borderRadius: 8, padding: "0 14px", cursor: "pointer", fontWeight: 700, fontSize: 13, opacity: chatLoading || !chatInput.trim() ? 0.5 : 1 }}>→</button>
-            </div>
-            <div style={{ marginTop: 6 }}>
-              <span style={{ fontSize: 9, color: "var(--text3)" }}>Arrastra el header para mover</span>
-            </div>
+          {/* Result area */}
+          <div style={{ flex: 1, overflowY: "auto", padding: "14px 16px" }}>
+            {!analyzerResult ? (
+              <div style={{ textAlign: "center", padding: "40px 10px", color: "var(--text3)" }}>
+                <div style={{ fontSize: 40, marginBottom: 12 }}>📊</div>
+                <div style={{ fontSize: 13, marginBottom: 6 }}>Selecciona un análisis arriba</div>
+                <div style={{ fontSize: 11, color: "var(--text3)" }}>Los datos se calculan de tus {trades.length} trades en {modeLabel}</div>
+                <div style={{ fontSize: 10, color: "var(--text3)", marginTop: 4 }}>Respeta los filtros activos del dashboard</div>
+              </div>
+            ) : (
+              <div>
+                <div style={{ fontFamily: "var(--mono)", fontWeight: 700, fontSize: 15, color: "var(--accent)", marginBottom: 12 }}>{analyzerResult.title}</div>
+                <div style={{ fontFamily: "var(--mono)", fontSize: 11, lineHeight: 1.8, whiteSpace: "pre-wrap", color: "var(--text)" }}>
+                  {analyzerResult.lines.map((line, i) => {
+                    if (line.startsWith("✅")) return <div key={i} style={{ color: "var(--green)" }}>{line}</div>
+                    if (line.startsWith("🔴")) return <div key={i} style={{ color: "var(--red)" }}>{line}</div>
+                    if (line.startsWith("⚠️")) return <div key={i} style={{ color: "var(--yellow)" }}>{line}</div>
+                    if (line.startsWith("💡")) return <div key={i} style={{ color: "var(--purple)" }}>{line}</div>
+                    if (line.startsWith("🔥")) return <div key={i} style={{ color: "var(--green)" }}>{line}</div>
+                    if (line.startsWith("🧊")) return <div key={i} style={{ color: "var(--accent)" }}>{line}</div>
+                    if (line.startsWith("─")) return <div key={i} style={{ color: "var(--border2)" }}>{line}</div>
+                    return <div key={i}>{line}</div>
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Footer */}
+          <div style={{ padding: "8px 14px", borderTop: "1px solid var(--border)", fontSize: 9, color: "var(--text3)" }}>
+            Arrastra el header para mover • Sin conexión a internet requerida
           </div>
         </div>
       )}
