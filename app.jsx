@@ -1160,6 +1160,9 @@ function AccountManager({ userId, onClose, inline }) {
   const [showAcctForm, setShowAcctForm] = useState(false)
   const [confirmOperate, setConfirmOperate] = useState(false)
   const [violationNote, setViolationNote] = useState("")
+  const [selectedAcctIds, setSelectedAcctIds] = useState(new Set())
+  const [editingDD, setEditingDD] = useState(null)
+  const [ddInput, setDDInput] = useState("")
 
   const amToday = new Date()
   const amTodayISO = fmtDateISO(amToday)
@@ -1257,6 +1260,49 @@ function AccountManager({ userId, onClose, inline }) {
     if (!confirm("Eliminar cuenta?")) return
     await supa(`am_accounts?id=eq.${id}`, { method: "DELETE" })
     await loadAM()
+  }
+
+  const toggleSelectAcct = (id) => {
+    setSelectedAcctIds(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id); else next.add(id)
+      return next
+    })
+  }
+
+  const assignToBlock = async (blockId) => {
+    if (selectedAcctIds.size === 0) return
+    setAmSaving(true)
+    try {
+      for (const acctId of selectedAcctIds) {
+        await supa(`am_accounts?id=eq.${acctId}`, { method: "PATCH", body: JSON.stringify({ block_id: blockId }) })
+      }
+      setSelectedAcctIds(new Set())
+      await loadAM()
+    } catch (e) { alert("Error: " + e.message) }
+    finally { setAmSaving(false) }
+  }
+
+  const unassignFromBlock = async (acctId) => {
+    setAmSaving(true)
+    try {
+      await supa(`am_accounts?id=eq.${acctId}`, { method: "PATCH", body: JSON.stringify({ block_id: null }) })
+      await loadAM()
+    } catch (e) { alert("Error: " + e.message) }
+    finally { setAmSaving(false) }
+  }
+
+  const saveDD = async (acctId) => {
+    const val = parseFloat(ddInput)
+    if (isNaN(val) || val <= 0) return
+    setAmSaving(true)
+    try {
+      await supa(`am_accounts?id=eq.${acctId}`, { method: "PATCH", body: JSON.stringify({ max_dd: val }) })
+      setEditingDD(null)
+      setDDInput("")
+      await loadAM()
+    } catch (e) { alert("Error: " + e.message) }
+    finally { setAmSaving(false) }
   }
 
   const setDayBlock = async (dayOfWeek, blockId) => {
@@ -1483,95 +1529,137 @@ function AccountManager({ userId, onClose, inline }) {
         {/* ═══ TAB: CONFIG ═══ */}
         {amTab === "config" && (
           <div>
-            <div style={{ marginBottom: 24 }}>
-              <div className="st">Bloques</div>
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
-                {blocks.map(b => {
-                  const bAccts = amAccounts.filter(a => a.block_id === b.id)
-                  return (
-                    <div key={b.id} style={{ background: "var(--bg)", border: `2px solid ${b.color}`, borderRadius: 10, padding: "10px 14px", minWidth: 120 }}>
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
-                        <span style={{ fontFamily: "var(--mono)", fontWeight: 700, color: b.color, fontSize: 14 }}>{b.name}</span>
-                        <button onClick={() => deleteBlock(b.id)} style={{ background: "none", border: "none", color: "var(--red)", cursor: "pointer", fontSize: 12, padding: 0 }}>✕</button>
+            {/* ── Create block ── */}
+            <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", marginBottom: 16 }}>
+              <input className="inp" value={newBlockName} onChange={e => setNewBlockName(e.target.value)} placeholder="Nombre del bloque" style={{ width: 160, fontSize: 12 }}
+                onKeyDown={e => { if (e.key === "Enter") addBlock() }} />
+              <div style={{ display: "flex", gap: 3 }}>
+                {BLOCK_COLORS.map(c => (
+                  <div key={c} onClick={() => setNewBlockColor(c)}
+                    style={{ width: 20, height: 20, borderRadius: 4, background: c, cursor: "pointer", border: newBlockColor === c ? "2px solid var(--text)" : "2px solid transparent" }} />
+                ))}
+              </div>
+              <button className="btn bp bx" onClick={addBlock} disabled={amSaving}>+ Bloque</button>
+            </div>
+
+            {/* ── Selection hint ── */}
+            {selectedAcctIds.size > 0 && (
+              <div style={{ padding: "8px 14px", background: "var(--ad)", borderRadius: 8, marginBottom: 12, display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+                <span style={{ fontFamily: "var(--mono)", fontSize: 12, color: "var(--accent)", fontWeight: 700 }}>{selectedAcctIds.size} seleccionadas</span>
+                <span style={{ fontSize: 11, color: "var(--text2)" }}>→ Click en un bloque para asignar</span>
+                <button className="btn bo bx" onClick={() => setSelectedAcctIds(new Set())} style={{ fontSize: 10 }}>Deseleccionar</button>
+              </div>
+            )}
+
+            {/* ── Blocks as drop targets ── */}
+            <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 20 }}>
+              {blocks.map(b => {
+                const bAccts = amAccounts.filter(a => a.block_id === b.id)
+                const isTarget = selectedAcctIds.size > 0
+                return (
+                  <div key={b.id}
+                    onClick={() => isTarget ? assignToBlock(b.id) : null}
+                    style={{
+                      background: "var(--bg)", border: `2px solid ${isTarget ? b.color : b.color + "60"}`, borderRadius: 12,
+                      padding: "12px 16px", minWidth: 200, flex: "1 1 200px", maxWidth: 400,
+                      cursor: isTarget ? "pointer" : "default",
+                      transition: "all .2s",
+                      boxShadow: isTarget ? `0 0 12px ${b.color}30` : "none"
+                    }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                      <span style={{ fontFamily: "var(--mono)", fontWeight: 700, color: b.color, fontSize: 16 }}>{b.name}</span>
+                      <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
+                        <span style={{ fontSize: 10, color: "var(--text3)" }}>{bAccts.length} cuentas</span>
+                        <button onClick={e => { e.stopPropagation(); deleteBlock(b.id) }} style={{ background: "none", border: "none", color: "var(--red)", cursor: "pointer", fontSize: 11, padding: 0 }}>✕</button>
                       </div>
-                      <div style={{ fontSize: 10, color: "var(--text3)" }}>{bAccts.length} cuentas</div>
                     </div>
-                  )
-                })}
-              </div>
-              <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
-                <input className="inp" value={newBlockName} onChange={e => setNewBlockName(e.target.value)} placeholder="Nombre del bloque" style={{ width: 160, fontSize: 12 }} />
-                <div style={{ display: "flex", gap: 3 }}>
-                  {BLOCK_COLORS.map(c => (
-                    <div key={c} onClick={() => setNewBlockColor(c)}
-                      style={{ width: 20, height: 20, borderRadius: 4, background: c, cursor: "pointer", border: newBlockColor === c ? "2px solid var(--text)" : "2px solid transparent" }} />
-                  ))}
-                </div>
-                <button className="btn bp bx" onClick={addBlock} disabled={amSaving}>+ Bloque</button>
-              </div>
-            </div>
-
-            <div>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-                <div className="st" style={{ marginBottom: 0 }}>Cuentas</div>
-                <button className="btn bp bx" onClick={() => openAcctForm(null)}>+ Cuenta</button>
-              </div>
-
-              {amAccounts.length === 0 ? (
-                <div className="em">No hay cuentas. Crea bloques primero y luego agrega cuentas.</div>
-              ) : (
-                <div style={{ overflowX: "auto" }}>
-                  <table className="tbl">
-                    <thead><tr><th>Cuenta</th><th>Firma</th><th>Bloque</th><th>Tamaño</th><th>DD Max</th><th>Balance</th><th>Estado</th><th></th></tr></thead>
-                    <tbody>
-                      {amAccounts.map(a => {
-                        const blk = blocks.find(b => b.id === a.block_id)
-                        const st = AM_STATUSES.find(s => s.value === a.status) || AM_STATUSES[0]
-                        return (
-                          <tr key={a.id}>
-                            <td className="mono bold">{a.name}</td>
-                            <td style={{ fontSize: 11, color: "var(--text2)" }}>{a.prop_firm}</td>
-                            <td>{blk ? <span style={{ color: blk.color, fontFamily: "var(--mono)", fontSize: 11, fontWeight: 600 }}>{blk.name}</span> : <span style={{ color: "var(--text3)", fontSize: 11 }}>—</span>}</td>
-                            <td className="mono" style={{ fontSize: 11 }}>{a.account_size ? fmt$(a.account_size) : "-"}</td>
-                            <td className="mono" style={{ fontSize: 11 }}>{a.max_dd ? fmt$(a.max_dd) : "-"}</td>
-                            <td className="mono" style={{ fontSize: 11 }}>{a.current_balance ? fmt$(a.current_balance) : "-"}</td>
-                            <td><span className="tag" style={{ background: st.color + "20", color: st.color }}>{st.label}</span></td>
-                            <td>
-                              <div style={{ display: "flex", gap: 3 }}>
-                                <button className="btn bo bx" onClick={() => openAcctForm(a)}>E</button>
-                                <button className="btn bd bx" onClick={() => deleteAcct(a.id)}>X</button>
+                    {isTarget && (
+                      <div style={{ textAlign: "center", padding: "6px 0", border: "1px dashed " + b.color, borderRadius: 6, fontSize: 11, color: b.color, marginBottom: 6 }}>
+                        ↓ Soltar {selectedAcctIds.size} cuentas aquí ↓
+                      </div>
+                    )}
+                    {bAccts.length > 0 && (
+                      <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+                        {bAccts.map(a => {
+                          const dd = getDDInfo(a)
+                          return (
+                            <div key={a.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "4px 8px", background: "var(--surface)", borderRadius: 6, fontSize: 11 }}>
+                              <span className="mono" style={{ fontWeight: 600, color: "var(--text)" }}>{a.name}</span>
+                              <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                                {dd && <span className="mono" style={{ fontSize: 10, color: dd.color }}>{fmt$(dd.remaining)}</span>}
+                                <button onClick={e => { e.stopPropagation(); unassignFromBlock(a.id) }} style={{ background: "none", border: "none", color: "var(--text3)", cursor: "pointer", fontSize: 10, padding: 0 }} title="Quitar del bloque">✕</button>
                               </div>
-                            </td>
-                          </tr>
-                        )
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-
-              {showAcctForm && (
-                <div style={{ marginTop: 16, padding: 16, background: "var(--bg)", borderRadius: 10, border: "1px solid var(--border)" }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 12 }}>
-                    <span style={{ fontFamily: "var(--mono)", fontWeight: 700, fontSize: 13 }}>{editAcct ? "Editar cuenta" : "Nueva cuenta"}</span>
-                    <button onClick={() => setShowAcctForm(false)} style={{ background: "none", border: "none", color: "var(--text3)", cursor: "pointer" }}>✕</button>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    )}
                   </div>
-                  <div className="form-grid">
-                    <div className="field"><label>Nombre</label><input className="inp" value={acctForm.name} onChange={e => setAcctForm(f => ({ ...f, name: e.target.value }))} placeholder="APEX-1" /></div>
-                    <div className="field"><label>Prop Firm</label><select className="inp" value={acctForm.prop_firm} onChange={e => setAcctForm(f => ({ ...f, prop_firm: e.target.value }))}>{AM_FIRMS.map(f => <option key={f} value={f}>{f}</option>)}</select></div>
-                    <div className="field"><label>Bloque</label><select className="inp" value={acctForm.block_id} onChange={e => setAcctForm(f => ({ ...f, block_id: e.target.value }))}><option value="">Sin asignar</option>{blocks.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}</select></div>
-                    <div className="field"><label>Tamaño cuenta ($)</label><input className="inp" type="number" value={acctForm.account_size} onChange={e => setAcctForm(f => ({ ...f, account_size: e.target.value }))} placeholder="50000" /></div>
-                    <div className="field"><label>DD Máximo ($)</label><input className="inp" type="number" value={acctForm.max_dd} onChange={e => setAcctForm(f => ({ ...f, max_dd: e.target.value }))} placeholder="2500" /></div>
-                    <div className="field"><label>Balance actual ($)</label><input className="inp" type="number" value={acctForm.current_balance} onChange={e => setAcctForm(f => ({ ...f, current_balance: e.target.value }))} placeholder="51200" /></div>
-                    <div className="field"><label>Estado</label><select className="inp" value={acctForm.status} onChange={e => setAcctForm(f => ({ ...f, status: e.target.value }))}>{AM_STATUSES.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}</select></div>
-                  </div>
-                  <div style={{ display: "flex", gap: 8, marginTop: 14 }}>
-                    <button className="btn bp bs" onClick={saveAcct} disabled={amSaving}>{editAcct ? "Guardar" : "Crear"}</button>
-                    <button className="btn bo bs" onClick={() => setShowAcctForm(false)}>Cancelar</button>
-                  </div>
-                </div>
-              )}
+                )
+              })}
+              {blocks.length === 0 && <div className="em">Crea un bloque arriba para empezar</div>}
             </div>
+
+            {/* ── Unassigned accounts (select to assign) ── */}
+            <div className="st">Cuentas {amAccounts.filter(a => !a.block_id).length > 0 ? "— selecciona y luego click en un bloque" : ""}</div>
+            {amAccounts.length === 0 ? (
+              <div className="em">No hay cuentas. Sincroniza desde NT8 primero.</div>
+            ) : (
+              <div style={{ overflowX: "auto" }}>
+                <table className="tbl">
+                  <thead><tr><th style={{ width: 30 }}></th><th>Cuenta</th><th>Firma</th><th>Bloque</th><th>Balance</th><th>DD Max</th><th>DD Disp.</th><th></th></tr></thead>
+                  <tbody>
+                    {amAccounts.map(a => {
+                      const blk = blocks.find(b => b.id === a.block_id)
+                      const dd = getDDInfo(a)
+                      const isSelected = selectedAcctIds.has(a.id)
+                      return (
+                        <tr key={a.id} style={{ background: isSelected ? "rgba(76,154,255,.08)" : "transparent", cursor: "pointer" }}
+                          onClick={() => toggleSelectAcct(a.id)}>
+                          <td style={{ textAlign: "center" }}>
+                            <div style={{ width: 16, height: 16, borderRadius: 4, border: isSelected ? "2px solid var(--accent)" : "2px solid var(--border2)", background: isSelected ? "var(--accent)" : "transparent", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                              {isSelected && <span style={{ color: "#fff", fontSize: 10, fontWeight: 700 }}>✓</span>}
+                            </div>
+                          </td>
+                          <td className="mono bold">{a.name}</td>
+                          <td style={{ fontSize: 11, color: "var(--text2)" }}>{a.prop_firm}</td>
+                          <td>{blk ? <span style={{ color: blk.color, fontFamily: "var(--mono)", fontSize: 11, fontWeight: 600 }}>{blk.name}</span> : <span style={{ color: "var(--text3)", fontSize: 11 }}>Sin asignar</span>}</td>
+                          <td className="mono" style={{ fontSize: 11 }}>{a.current_balance ? fmt$(Math.round(a.current_balance)) : "-"}</td>
+                          <td onClick={e => e.stopPropagation()}>
+                            {editingDD === a.id ? (
+                              <div style={{ display: "flex", gap: 3, alignItems: "center" }}>
+                                <input className="inp" type="number" value={ddInput} onChange={e => setDDInput(e.target.value)} placeholder="2500"
+                                  style={{ width: 70, fontSize: 10, padding: "3px 6px" }} autoFocus
+                                  onKeyDown={e => { if (e.key === "Enter") saveDD(a.id); if (e.key === "Escape") { setEditingDD(null); setDDInput("") } }} />
+                                <button onClick={() => saveDD(a.id)} style={{ background: "none", border: "none", color: "var(--green)", cursor: "pointer", fontSize: 11 }}>✓</button>
+                              </div>
+                            ) : (
+                              <span className="mono" style={{ fontSize: 11, color: a.max_dd ? "var(--text)" : "var(--text3)", cursor: "pointer", textDecoration: "underline dotted" }}
+                                onClick={() => { setEditingDD(a.id); setDDInput(a.max_dd ? String(a.max_dd) : "") }}>
+                                {a.max_dd ? fmt$(a.max_dd) : "Click"}
+                              </span>
+                            )}
+                          </td>
+                          <td>
+                            {dd ? (
+                              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                                <div style={{ width: 40, height: 5, background: "var(--bg)", borderRadius: 3, overflow: "hidden" }}>
+                                  <div style={{ width: `${Math.max(dd.pct, 0)}%`, height: "100%", background: dd.color, borderRadius: 3 }} />
+                                </div>
+                                <span className="mono" style={{ fontSize: 10, color: dd.color, fontWeight: 600 }}>{fmt$(dd.remaining)}</span>
+                              </div>
+                            ) : <span style={{ color: "var(--text3)", fontSize: 10 }}>—</span>}
+                          </td>
+                          <td onClick={e => e.stopPropagation()}>
+                            <button className="btn bd bx" onClick={() => deleteAcct(a.id)} style={{ fontSize: 9 }}>X</button>
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
         )}
 
