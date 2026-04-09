@@ -2508,8 +2508,61 @@ function MainApp({ user, onLogout }) {
 
   return (
     <>
-      {/* Screenshot modal */}
-      {viewSS && <div className="ss-modal" onClick={() => setViewSS(null)}><img src={viewSS} /></div>}
+      {/* Screenshot modal with navigation */}
+      {viewSS && (() => {
+        // Build list of all screenshots from current trades for navigation
+        const allSS = trades.filter(t => t.screenshot).sort((a, b) => {
+          const dc = (a.fecha || "").localeCompare(b.fecha || "")
+          if (dc !== 0) return dc
+          return (a.horaInicio || "").localeCompare(b.horaInicio || "")
+        }).map(t => ({ url: t.screenshot, fecha: t.fecha, hora: t.horaInicio, r: gR(t), resultado: t.resultado }))
+        const curIdx = allSS.findIndex(s => s.url === (typeof viewSS === "string" ? viewSS : viewSS.url))
+        const ssUrl = typeof viewSS === "string" ? viewSS : viewSS.url
+        const prev = curIdx > 0 ? allSS[curIdx - 1] : null
+        const next = curIdx < allSS.length - 1 ? allSS[curIdx + 1] : null
+        const cur = curIdx >= 0 ? allSS[curIdx] : null
+
+        const goSS = (ss) => {
+          setViewSS({ url: ss.url })
+          if (ss.fecha && dayModal) setDayModal(ss.fecha)
+          if (ss.fecha && tDayModal) setTDayModal(ss.fecha)
+        }
+
+        return (
+          <div className="ss-modal" onClick={e => { e.stopPropagation(); setViewSS(null) }}
+            onKeyDown={e => { if (e.key === "ArrowLeft" && prev) { e.stopPropagation(); goSS(prev) } else if (e.key === "ArrowRight" && next) { e.stopPropagation(); goSS(next) } }} tabIndex={0} ref={el => el && el.focus()}>
+            {/* Left arrow */}
+            {prev && (
+              <div onClick={e => { e.stopPropagation(); goSS(prev) }}
+                style={{ position: "fixed", left: 12, top: "50%", transform: "translateY(-50%)", background: "rgba(0,0,0,.7)", borderRadius: 10, padding: "16px 12px", cursor: "pointer", zIndex: 10001, textAlign: "center" }}>
+                <div style={{ fontSize: 24, color: "var(--text)" }}>◀</div>
+                <div style={{ fontSize: 9, color: "var(--text3)", fontFamily: "var(--mono)", marginTop: 4 }}>{fmtD(prev.fecha)}</div>
+                <div style={{ fontSize: 9, color: prev.r > 0 ? "var(--green)" : prev.r < 0 ? "var(--red)" : "var(--yellow)", fontFamily: "var(--mono)" }}>{fmtR(prev.r)}</div>
+              </div>
+            )}
+            {/* Image */}
+            <div onClick={e => e.stopPropagation()} style={{ position: "relative" }}>
+              <img src={ssUrl} style={{ maxWidth: "85vw", maxHeight: "85vh", borderRadius: 10 }} />
+              {cur && (
+                <div style={{ position: "absolute", bottom: -30, left: "50%", transform: "translateX(-50%)", display: "flex", gap: 12, alignItems: "center" }}>
+                  <span style={{ fontFamily: "var(--mono)", fontSize: 12, color: "var(--text)" }}>{fmtD(cur.fecha)} {cur.hora}</span>
+                  <span style={{ fontFamily: "var(--mono)", fontSize: 12, fontWeight: 700, color: cur.r > 0 ? "var(--green)" : cur.r < 0 ? "var(--red)" : "var(--yellow)" }}>{fmtR(cur.r)}</span>
+                  <span style={{ fontSize: 10, color: "var(--text3)" }}>{curIdx + 1}/{allSS.length}</span>
+                </div>
+              )}
+            </div>
+            {/* Right arrow */}
+            {next && (
+              <div onClick={e => { e.stopPropagation(); goSS(next) }}
+                style={{ position: "fixed", right: 12, top: "50%", transform: "translateY(-50%)", background: "rgba(0,0,0,.7)", borderRadius: 10, padding: "16px 12px", cursor: "pointer", zIndex: 10001, textAlign: "center" }}>
+                <div style={{ fontSize: 24, color: "var(--text)" }}>▶</div>
+                <div style={{ fontSize: 9, color: "var(--text3)", fontFamily: "var(--mono)", marginTop: 4 }}>{fmtD(next.fecha)}</div>
+                <div style={{ fontSize: 9, color: next.r > 0 ? "var(--green)" : next.r < 0 ? "var(--red)" : "var(--yellow)", fontFamily: "var(--mono)" }}>{fmtR(next.r)}</div>
+              </div>
+            )}
+          </div>
+        )
+      })()}
       {/* NT8 import modal */}
       {showNT8 && <NT8Modal onImport={handleNT8Import} onClose={() => setShowNT8(false)} />}
       {/* Share card modal */}
@@ -3447,7 +3500,7 @@ body{background:var(--bg);color:var(--text);font-family:var(--font);font-size:14
 .mobile-bar{display:none;position:fixed;top:0;left:0;right:0;height:52px;background:var(--surface);border-bottom:1px solid var(--border);z-index:101;align-items:center;padding:0 16px;justify-content:space-between}
 @media(max-width:900px){.mobile-bar{display:flex}.main{margin-left:0;padding:68px 16px 40px}.sidebar{transform:translateX(-240px)}.sidebar.open{transform:translateX(0)}}
 .overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:99}
-.ss-modal{position:fixed;inset:0;background:rgba(0,0,0,.9);z-index:9999;display:flex;align-items:center;justify-content:center;cursor:pointer}
+.ss-modal{position:fixed;inset:0;background:rgba(0,0,0,.9);z-index:10000;display:flex;align-items:center;justify-content:center;cursor:pointer}
 .ss-modal img{max-width:92vw;max-height:92vh;border-radius:var(--radius)}
 .sb-brand{padding:24px 20px 16px;border-bottom:1px solid var(--border)}
 .sb-brand h1{font-size:20px;font-weight:700;letter-spacing:-.5px}
