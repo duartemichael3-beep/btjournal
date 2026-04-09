@@ -1978,6 +1978,11 @@ function MainApp({ user, onLogout }) {
   const [publicLink, setPublicLink] = useState("")
   const [selectMode, setSelectMode] = useState(false)
   const [selectedTradeIds, setSelectedTradeIds] = useState(new Set())
+  const [chatOpen, setChatOpen] = useState(false)
+  const [chatMsgs, setChatMsgs] = useState([])
+  const [chatInput, setChatInput] = useState("")
+  const [chatLoading, setChatLoading] = useState(false)
+  const chatEndRef = useRef(null)
   const fileRef = useRef()
 
   // Team state
@@ -2246,6 +2251,93 @@ function MainApp({ user, onLogout }) {
     } catch (e) { alert("Error: " + e.message) }
     finally { setSaving(false) }
   }
+
+  // ── AI Chat ──
+  const buildChatContext = () => {
+    const s = cS(filtered)
+    const ex = extraS(filtered)
+    const be = beAnalysis(filtered)
+    const mo = grpBy(trades, t => getMo(t.fecha))
+    const dy = grpBy(trades, t => t.fecha)
+
+    let ctx = `MODO: ${modeLabel}\nFILTROS ACTIVOS: ${fP !== "all" ? fP : "ninguno"}${fS !== "all" ? ", setup=" + fS : ""}${fd1 ? ", desde=" + fd1 : ""}${fd2 ? ", hasta=" + fd2 : ""}\n\n`
+    ctx += `ESTADISTICAS GENERALES:\nTrades: ${s.total} | Win%: ${s.winRate.toFixed(2)}% | P&L: ${s.totalR}R (${fmt$(s.totalDollar)}) | PF: ${fmtPF(s.profitFactor)} | Expectancy: ${s.expectancy}R | Sharpe: ${s.sharpeRatio.toFixed(2)} | Recovery: ${s.recoveryFactor === Infinity ? "∞" : s.recoveryFactor.toFixed(2)} | Payoff: ${s.payoffRatio === Infinity ? "∞" : s.payoffRatio.toFixed(2)}\n`
+    ctx += `Wins: ${s.wins} | Losses: ${s.losses} | BEs: ${s.bes} | Racha WIN: ${s.maxWinStreak} | Racha LOSS: ${s.maxLossStreak} | Max DD: ${s.maxEquityDD}R\n`
+    ctx += `Mejor dia: ${ex.bestDay} | Peor dia: ${ex.worstDay} | Ops/dia: ${ex.avgOps} | Mejor dia sem: ${ex.bestWd} | Peor dia sem: ${ex.worstWd}\n`
+    ctx += `Dur promedio WIN: ${s.avgDurWin}min | SL: ${s.avgDurSL}min | BE: ${s.avgDurBE}min\n\n`
+
+    if (be && be.withData > 0) {
+      ctx += `ANALISIS BE:\nTotal BE: ${be.total} | R dejados: ${be.totalMissed}R (${fmt$(be.totalMissedDollar)}) | Promedio: ${be.avgMissed}R/trade\n`
+      if (be.worstMissed) ctx += `Peor BE: ${be.worstMissed.rmax}R el ${be.worstMissed.fecha} (${be.worstMissed.setup})\n`
+      if (be.bySetup.length) ctx += `BE por setup: ${be.bySetup.map(s2 => `${s2.setup}:${s2.count}BE/${s2.totalR}R`).join(", ")}\n`
+      ctx += "\n"
+    }
+
+    ctx += `RENDIMIENTO MENSUAL:\n`
+    mo.slice(0, 6).forEach(m => { ctx += `${m.key}: ${m.totalR}R (${m.total}t, ${m.winRate.toFixed(1)}%WR)\n` })
+    ctx += "\n"
+
+    ctx += `ULTIMOS 10 DIAS:\n`
+    dy.slice(0, 10).forEach(d => { ctx += `${d.key}: ${d.totalR}R (${d.total}t)\n` })
+    ctx += "\n"
+
+    // Setup breakdown
+    const sr2 = SR.map(su => {
+      const ss = cS(trades.filter(t => t.setup === su))
+      return ss.total > 0 ? `${su}: ${ss.total}t, ${ss.winRate.toFixed(1)}%WR, ${ss.totalR}R, PF:${fmtPF(ss.profitFactor)}` : null
+    }).filter(Boolean)
+    if (sr2.length) ctx += `POR SETUP:\n${sr2.join("\n")}\n\n`
+
+    // Last 20 trades detail
+    ctx += `ULTIMOS 20 TRADES:\n`
+    filtered.slice(0, 20).forEach(t => {
+      const r = gR(t)
+      ctx += `${t.fecha} ${t.horaInicio} ${t.setup} ${t.buySell} ${t.resultado} ${r > 0 ? "+" : ""}${r}R rMax:${t.rMaximo || "-"} ${t.direccionDia} ${t.accountName || ""}\n`
+    })
+
+    return ctx
+  }
+
+  const sendChat = async () => {
+    if (!chatInput.trim() || chatLoading) return
+    const userMsg = chatInput.trim()
+    setChatInput("")
+    setChatMsgs(prev => [...prev, { role: "user", text: userMsg }])
+    setChatLoading(true)
+
+    try {
+      const context = buildChatContext()
+      const systemPrompt = `Eres un coach de trading experto que analiza el journal de un trader. Tienes acceso a sus estadisticas y trades. Responde en español, se directo y conciso. Usa datos especificos de sus stats para dar consejos accionables. Si te preguntan algo que no esta en los datos, dilo. No inventes datos. Usa emojis con moderacion. El valor de 1R es $${RV}.`
+
+      const messages = [
+        ...chatMsgs.filter(m => m.role === "user" || m.role === "assistant").slice(-8).map(m => ({
+          role: m.role === "user" ? "user" : "assistant",
+          content: m.text
+        })),
+        { role: "user", content: `[DATOS DEL JOURNAL]\n${context}\n\n[PREGUNTA]\n${userMsg}` }
+      ]
+
+      const res = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: "claude-sonnet-4-20250514",
+          max_tokens: 1000,
+          system: systemPrompt,
+          messages
+        })
+      })
+
+      const data = await res.json()
+      const reply = data.content ? data.content.map(b => b.text || "").join("") : "Error: sin respuesta"
+      setChatMsgs(prev => [...prev, { role: "assistant", text: reply }])
+    } catch (e) {
+      setChatMsgs(prev => [...prev, { role: "assistant", text: "Error: " + e.message }])
+    }
+    finally { setChatLoading(false) }
+  }
+
+  useEffect(() => { if (chatEndRef.current) chatEndRef.current.scrollIntoView({ behavior: "smooth" }) }, [chatMsgs])
   const edit = t => { setForm({ ...DFT, ...t }); setEditId(t.id); setTab("addTrade") }
   const goTab = t => { setTab(t); if (window.innerWidth <= 900) setSb(false); if (t === "addTrade" && !editId) setForm({ ...DFT }) }
 
@@ -3627,6 +3719,72 @@ function MainApp({ user, onLogout }) {
 )}
 
       </div>
+
+      {/* ── AI Chat floating button ── */}
+      <div onClick={() => setChatOpen(!chatOpen)}
+        style={{ position: "fixed", bottom: 24, right: 24, width: 52, height: 52, borderRadius: "50%", background: "var(--accent)", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", boxShadow: "0 4px 20px rgba(76,154,255,.4)", zIndex: 998, fontSize: 22, transition: "transform .2s", transform: chatOpen ? "rotate(45deg)" : "none" }}>
+        {chatOpen ? "+" : "🤖"}
+      </div>
+
+      {/* ── AI Chat panel ── */}
+      {chatOpen && (
+        <div style={{ position: "fixed", bottom: 88, right: 24, width: 380, maxWidth: "calc(100vw - 48px)", height: 520, maxHeight: "calc(100vh - 120px)", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 16, zIndex: 998, display: "flex", flexDirection: "column", boxShadow: "0 8px 40px rgba(0,0,0,.5)" }}>
+          {/* Chat header */}
+          <div style={{ padding: "14px 16px", borderBottom: "1px solid var(--border)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <div>
+              <div style={{ fontFamily: "var(--mono)", fontWeight: 700, fontSize: 13, color: "var(--accent)" }}>🤖 Trading Coach AI</div>
+              <div style={{ fontSize: 10, color: "var(--text3)" }}>{modeLabel} • {stats.total} trades cargados</div>
+            </div>
+            <div style={{ display: "flex", gap: 6 }}>
+              <button onClick={() => setChatMsgs([])} style={{ background: "none", border: "none", color: "var(--text3)", cursor: "pointer", fontSize: 11 }} title="Limpiar chat">🗑</button>
+              <button onClick={() => setChatOpen(false)} style={{ background: "none", border: "none", color: "var(--text3)", cursor: "pointer", fontSize: 14 }}>✕</button>
+            </div>
+          </div>
+
+          {/* Chat messages */}
+          <div style={{ flex: 1, overflowY: "auto", padding: "12px 14px", display: "flex", flexDirection: "column", gap: 10 }}>
+            {chatMsgs.length === 0 && (
+              <div style={{ textAlign: "center", padding: "30px 10px", color: "var(--text3)" }}>
+                <div style={{ fontSize: 32, marginBottom: 8 }}>🤖</div>
+                <div style={{ fontSize: 13, marginBottom: 12 }}>Pregúntame sobre tu trading</div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                  {["¿Cómo fue mi semana?", "¿Cuál es mi mejor setup?", "Analiza mis BEs", "¿A qué hora opero mejor?", "Dame un resumen general"].map(q => (
+                    <div key={q} onClick={() => { setChatInput(q); }} style={{ padding: "6px 10px", background: "var(--bg)", borderRadius: 6, fontSize: 11, color: "var(--accent)", cursor: "pointer", border: "1px solid var(--border)" }}>{q}</div>
+                  ))}
+                </div>
+              </div>
+            )}
+            {chatMsgs.map((m, i) => (
+              <div key={i} style={{ display: "flex", justifyContent: m.role === "user" ? "flex-end" : "flex-start" }}>
+                <div style={{
+                  maxWidth: "85%", padding: "8px 12px", borderRadius: 12,
+                  background: m.role === "user" ? "var(--ad)" : "var(--bg)",
+                  color: m.role === "user" ? "var(--accent)" : "var(--text)",
+                  fontSize: 12, lineHeight: 1.5, whiteSpace: "pre-wrap", wordBreak: "break-word"
+                }}>
+                  {m.text}
+                </div>
+              </div>
+            ))}
+            {chatLoading && (
+              <div style={{ display: "flex", justifyContent: "flex-start" }}>
+                <div style={{ padding: "8px 12px", background: "var(--bg)", borderRadius: 12, fontSize: 12, color: "var(--text3)" }}>Analizando...</div>
+              </div>
+            )}
+            <div ref={chatEndRef} />
+          </div>
+
+          {/* Chat input */}
+          <div style={{ padding: "10px 14px", borderTop: "1px solid var(--border)", display: "flex", gap: 8 }}>
+            <input className="inp" value={chatInput} onChange={e => setChatInput(e.target.value)}
+              onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendChat() } }}
+              placeholder="Pregunta sobre tu trading..."
+              style={{ flex: 1, fontSize: 12, padding: "8px 10px" }} />
+            <button onClick={sendChat} disabled={chatLoading || !chatInput.trim()}
+              style={{ background: "var(--accent)", color: "#fff", border: "none", borderRadius: 8, padding: "0 14px", cursor: "pointer", fontWeight: 700, fontSize: 13, opacity: chatLoading || !chatInput.trim() ? 0.5 : 1 }}>→</button>
+          </div>
+        </div>
+      )}
     </>
   )
 } // ← closes MainApp
