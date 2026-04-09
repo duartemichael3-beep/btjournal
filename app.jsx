@@ -1982,9 +1982,7 @@ function MainApp({ user, onLogout }) {
   const [chatMsgs, setChatMsgs] = useState([])
   const [chatInput, setChatInput] = useState("")
   const [chatLoading, setChatLoading] = useState(false)
-  const [chatApiKey, setChatApiKey] = useState(() => {
-    try { return localStorage.getItem("mjp_ai_key") || "" } catch { return "" }
-  })
+  const [chatApiKey] = useState("AIzaSyAfyK-r-D73KLQXsALCRiSXkbQg2SS7Y_k")
   const [chatPos, setChatPos] = useState({ x: null, y: null })
   const [chatDragging, setChatDragging] = useState(false)
   const chatDragOffset = useRef({ x: 0, y: 0 })
@@ -2324,19 +2322,15 @@ function MainApp({ user, onLogout }) {
         { role: "user", content: `[DATOS DEL JOURNAL]\n${context}\n\n[PREGUNTA]\n${userMsg}` }
       ]
 
-      const res = await fetch("https://api.anthropic.com/v1/messages", {
+      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${chatApiKey}`, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-api-key": chatApiKey,
-          "anthropic-version": "2023-06-01",
-          "anthropic-dangerous-direct-browser-access": "true"
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          model: "claude-sonnet-4-20250514",
-          max_tokens: 1000,
-          system: systemPrompt,
-          messages
+          system_instruction: { parts: [{ text: systemPrompt }] },
+          contents: messages.map(m => ({
+            role: m.role === "assistant" ? "model" : "user",
+            parts: [{ text: m.content }]
+          }))
         })
       })
 
@@ -2344,7 +2338,9 @@ function MainApp({ user, onLogout }) {
       if (data.error) {
         setChatMsgs(prev => [...prev, { role: "assistant", text: "Error: " + (data.error.message || JSON.stringify(data.error)) }])
       } else {
-        const reply = data.content ? data.content.map(b => b.text || "").join("") : "Sin respuesta"
+        const reply = data.candidates && data.candidates[0] && data.candidates[0].content
+          ? data.candidates[0].content.parts.map(p => p.text || "").join("")
+          : "Sin respuesta"
         setChatMsgs(prev => [...prev, { role: "assistant", text: reply }])
       }
     } catch (e) {
@@ -3777,79 +3773,53 @@ function MainApp({ user, onLogout }) {
             </div>
           </div>
 
-          {/* API Key setup (if no key) */}
-          {!chatApiKey ? (
-            <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: 24 }}>
-              <div style={{ fontSize: 40, marginBottom: 12 }}>🔑</div>
-              <div style={{ fontSize: 14, fontWeight: 600, color: "var(--text)", marginBottom: 4, textAlign: "center" }}>API Key requerida</div>
-              <div style={{ fontSize: 11, color: "var(--text3)", marginBottom: 16, textAlign: "center", lineHeight: 1.5 }}>
-                Necesitas una API key de Anthropic para usar el chat AI. Cada usuario usa su propia key.<br />
-                Ve a <span style={{ color: "var(--accent)" }}>console.anthropic.com</span> para crear una.
+          {/* Chat messages */}
+          <div style={{ flex: 1, overflowY: "auto", padding: "12px 14px", display: "flex", flexDirection: "column", gap: 10 }}>
+            {chatMsgs.length === 0 && (
+              <div style={{ textAlign: "center", padding: "20px 10px", color: "var(--text3)" }}>
+                <div style={{ fontSize: 32, marginBottom: 8 }}>🤖</div>
+                <div style={{ fontSize: 13, marginBottom: 12 }}>Pregúntame sobre tu trading</div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                  {["¿Cómo fue mi semana?", "¿Cuál es mi mejor setup?", "Analiza mis BEs", "¿A qué hora opero mejor?", "Dame un resumen general"].map(q => (
+                    <div key={q} onClick={() => { setChatInput(q) }} style={{ padding: "6px 10px", background: "var(--bg)", borderRadius: 6, fontSize: 11, color: "var(--accent)", cursor: "pointer", border: "1px solid var(--border)" }}>{q}</div>
+                  ))}
+                </div>
               </div>
-              <input className="inp" type="password" placeholder="sk-ant-..." style={{ width: "100%", fontSize: 12, marginBottom: 10 }}
-                onChange={e => {
-                  const val = e.target.value.trim()
-                  if (val.startsWith("sk-ant-")) {
-                    setChatApiKey(val)
-                    try { localStorage.setItem("mjp_ai_key", val) } catch {}
-                  }
-                }}
-              />
-              <div style={{ fontSize: 9, color: "var(--text3)", textAlign: "center" }}>Se guarda solo en tu browser. No se comparte con nadie.</div>
-            </div>
-          ) : (
-            <>
-              {/* Chat messages */}
-              <div style={{ flex: 1, overflowY: "auto", padding: "12px 14px", display: "flex", flexDirection: "column", gap: 10 }}>
-                {chatMsgs.length === 0 && (
-                  <div style={{ textAlign: "center", padding: "20px 10px", color: "var(--text3)" }}>
-                    <div style={{ fontSize: 32, marginBottom: 8 }}>🤖</div>
-                    <div style={{ fontSize: 13, marginBottom: 12 }}>Pregúntame sobre tu trading</div>
-                    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                      {["¿Cómo fue mi semana?", "¿Cuál es mi mejor setup?", "Analiza mis BEs", "¿A qué hora opero mejor?", "Dame un resumen general"].map(q => (
-                        <div key={q} onClick={() => { setChatInput(q) }} style={{ padding: "6px 10px", background: "var(--bg)", borderRadius: 6, fontSize: 11, color: "var(--accent)", cursor: "pointer", border: "1px solid var(--border)" }}>{q}</div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-                {chatMsgs.map((m, i) => (
-                  <div key={i} style={{ display: "flex", justifyContent: m.role === "user" ? "flex-end" : "flex-start" }}>
-                    <div style={{
-                      maxWidth: "85%", padding: "8px 12px", borderRadius: 12,
-                      background: m.role === "user" ? "var(--ad)" : "var(--bg)",
-                      color: m.role === "user" ? "var(--accent)" : "var(--text)",
-                      fontSize: 12, lineHeight: 1.5, whiteSpace: "pre-wrap", wordBreak: "break-word"
-                    }}>
-                      {m.text}
-                    </div>
-                  </div>
-                ))}
-                {chatLoading && (
-                  <div style={{ display: "flex", justifyContent: "flex-start" }}>
-                    <div style={{ padding: "8px 12px", background: "var(--bg)", borderRadius: 12, fontSize: 12, color: "var(--text3)" }}>Analizando tus datos...</div>
-                  </div>
-                )}
-                <div ref={chatEndRef} />
+            )}
+            {chatMsgs.map((m, i) => (
+              <div key={i} style={{ display: "flex", justifyContent: m.role === "user" ? "flex-end" : "flex-start" }}>
+                <div style={{
+                  maxWidth: "85%", padding: "8px 12px", borderRadius: 12,
+                  background: m.role === "user" ? "var(--ad)" : "var(--bg)",
+                  color: m.role === "user" ? "var(--accent)" : "var(--text)",
+                  fontSize: 12, lineHeight: 1.5, whiteSpace: "pre-wrap", wordBreak: "break-word"
+                }}>
+                  {m.text}
+                </div>
               </div>
+            ))}
+            {chatLoading && (
+              <div style={{ display: "flex", justifyContent: "flex-start" }}>
+                <div style={{ padding: "8px 12px", background: "var(--bg)", borderRadius: 12, fontSize: 12, color: "var(--text3)" }}>Analizando tus datos...</div>
+              </div>
+            )}
+            <div ref={chatEndRef} />
+          </div>
 
-              {/* Chat input */}
-              <div style={{ padding: "10px 14px", borderTop: "1px solid var(--border)" }}>
-                <div style={{ display: "flex", gap: 8 }}>
-                  <input className="inp" value={chatInput} onChange={e => setChatInput(e.target.value)}
-                    onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendChat() } }}
-                    placeholder="Pregunta sobre tu trading..."
-                    style={{ flex: 1, fontSize: 12, padding: "8px 10px" }} />
-                  <button onClick={sendChat} disabled={chatLoading || !chatInput.trim()}
-                    style={{ background: "var(--accent)", color: "#fff", border: "none", borderRadius: 8, padding: "0 14px", cursor: "pointer", fontWeight: 700, fontSize: 13, opacity: chatLoading || !chatInput.trim() ? 0.5 : 1 }}>→</button>
-                </div>
-                <div style={{ display: "flex", justifyContent: "space-between", marginTop: 6 }}>
-                  <span style={{ fontSize: 9, color: "var(--text3)" }}>Arrastra el header para mover</span>
-                  <button onClick={() => { setChatApiKey(""); try { localStorage.removeItem("mjp_ai_key") } catch {} }}
-                    style={{ background: "none", border: "none", color: "var(--text3)", cursor: "pointer", fontSize: 9 }}>Cambiar API key</button>
-                </div>
-              </div>
-            </>
-          )}
+          {/* Chat input */}
+          <div style={{ padding: "10px 14px", borderTop: "1px solid var(--border)" }}>
+            <div style={{ display: "flex", gap: 8 }}>
+              <input className="inp" value={chatInput} onChange={e => setChatInput(e.target.value)}
+                onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendChat() } }}
+                placeholder="Pregunta sobre tu trading..."
+                style={{ flex: 1, fontSize: 12, padding: "8px 10px" }} />
+              <button onClick={sendChat} disabled={chatLoading || !chatInput.trim()}
+                style={{ background: "var(--accent)", color: "#fff", border: "none", borderRadius: 8, padding: "0 14px", cursor: "pointer", fontWeight: 700, fontSize: 13, opacity: chatLoading || !chatInput.trim() ? 0.5 : 1 }}>→</button>
+            </div>
+            <div style={{ marginTop: 6 }}>
+              <span style={{ fontSize: 9, color: "var(--text3)" }}>Arrastra el header para mover</span>
+            </div>
+          </div>
         </div>
       )}
     </>
