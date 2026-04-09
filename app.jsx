@@ -147,7 +147,8 @@ const t2d = (t, uid, mode = "bt") => ({
   dd_puntos: t.ddPuntos || "", hay_noticia: t.hayNoticia,
   noticia_hora: t.noticiaHora || "", noticia_impacto: t.noticiaImpacto || "",
   noticia_tipo: t.noticiaTipo || "", m5: t.m5 || "", m15: t.m15 || "",
-  m30: t.m30 || "", screenshot: t.screenshot || "", notas: t.notas || ""
+  m30: t.m30 || "", screenshot: t.screenshot || "", notas: t.notas || "",
+  account_name: t.accountName || ""
 })
 
 const d2t = d => ({
@@ -163,7 +164,7 @@ const d2t = d => ({
   noticiaImpacto: d.noticia_impacto || "", noticiaTipo: d.noticia_tipo || "",
   m5: d.m5 || "", m15: d.m15 || "", m30: d.m30 || "",
   screenshot: d.screenshot || null, screenshotPreview: d.screenshot || null,
-  notas: d.notas || ""
+  notas: d.notas || "", accountName: d.account_name || ""
 })
 
 // ═══════════════════════════════════════════════
@@ -1773,6 +1774,7 @@ function MainApp({ user, onLogout }) {
   const [fN, setFN] = useState("")
   const [fd1, setFd1] = useState("")
   const [fd2, setFd2] = useState("")
+  const [fAcct, setFAcct] = useState("all")  // account filter
   const [viewSS, setViewSS] = useState(null)
   const [sb, setSb] = useState(window.innerWidth > 900)
   const [calMonth, setCM] = useState(new Date().getMonth())
@@ -2184,8 +2186,16 @@ function MainApp({ user, onLogout }) {
   )
 
   // ── Computed data ──
+  // Unique account names from trades (for filter dropdown)
+  const accountNames = useMemo(() => {
+    const names = new Set()
+    trades.forEach(t => { if (t.accountName) names.add(t.accountName) })
+    return Array.from(names).sort()
+  }, [trades])
+
   const filtered = useMemo(() => {
     let ft = [...trades]
+    if (fAcct !== "all") ft = ft.filter(t => t.accountName === fAcct)
     if (fS !== "all") ft = ft.filter(t => t.setup === fS)
     if (fd1) ft = ft.filter(t => t.fecha >= fd1)
     if (fd2) ft = ft.filter(t => t.fecha <= fd2)
@@ -2199,7 +2209,7 @@ function MainApp({ user, onLogout }) {
     // N trades filter — applied last so it gets the N most recent
     if (fN && parseInt(fN) > 0) ft = ft.slice(0, parseInt(fN))
     return ft
-  }, [trades, fP, fS, fN, fd1, fd2])
+  }, [trades, fP, fS, fN, fd1, fd2, fAcct])
 
   const stats = useMemo(() => cS(filtered), [filtered])
   const extra = useMemo(() => extraS(filtered), [filtered])
@@ -2261,6 +2271,12 @@ function MainApp({ user, onLogout }) {
   // ── Filters bar ──
   const Filters = () => (
     <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "flex-end" }}>
+      {appMode === "journal" && accountNames.length > 0 && (
+        <select className="inp" style={{ width: "auto", fontSize: 11, padding: "6px 8px", borderColor: fAcct !== "all" ? "var(--purple)" : "var(--border2)", color: fAcct !== "all" ? "var(--purple)" : "var(--text)" }} value={fAcct} onChange={e => setFAcct(e.target.value)}>
+          <option value="all">Todas las cuentas</option>
+          {accountNames.map(a => <option key={a} value={a}>{a}</option>)}
+        </select>
+      )}
       <select className="inp" style={{ width: "auto" }} value={fS} onChange={e => setFS(e.target.value)}>
         <option value="all">All</option>
         {SR.map(s => <option key={s} value={s}>{s}</option>)}
@@ -2278,7 +2294,7 @@ function MainApp({ user, onLogout }) {
         <label style={{ fontSize: 8 }}>N trades</label>
         <input className="inp" type="number" min="1" style={{ width: 60, fontSize: 11, padding: "6px 4px" }} value={fN} onChange={e => setFN(e.target.value)} placeholder="Ult" />
       </div>
-      {(fd1 || fd2 || fS !== "all" || fP !== "all" || fN) && <button className="btn bo bx" style={{ fontSize: 10 }} onClick={() => { setFd1(""); setFd2(""); setFS("all"); setFP("all"); setFN(""); setCM(new Date().getMonth()); setCY(new Date().getFullYear()) }}>Reset</button>}
+      {(fd1 || fd2 || fS !== "all" || fP !== "all" || fN || fAcct !== "all") && <button className="btn bo bx" style={{ fontSize: 10 }} onClick={() => { setFd1(""); setFd2(""); setFS("all"); setFP("all"); setFN(""); setFAcct("all"); setCM(new Date().getMonth()); setCY(new Date().getFullYear()) }}>Reset</button>}
     </div>
   )
 
