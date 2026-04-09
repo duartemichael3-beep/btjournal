@@ -1982,6 +1982,12 @@ function MainApp({ user, onLogout }) {
   const [chatMsgs, setChatMsgs] = useState([])
   const [chatInput, setChatInput] = useState("")
   const [chatLoading, setChatLoading] = useState(false)
+  const [chatApiKey, setChatApiKey] = useState(() => {
+    try { return localStorage.getItem("mjp_ai_key") || "" } catch { return "" }
+  })
+  const [chatPos, setChatPos] = useState({ x: null, y: null })
+  const [chatDragging, setChatDragging] = useState(false)
+  const chatDragOffset = useRef({ x: 0, y: 0 })
   const chatEndRef = useRef(null)
   const fileRef = useRef()
 
@@ -2300,6 +2306,7 @@ function MainApp({ user, onLogout }) {
 
   const sendChat = async () => {
     if (!chatInput.trim() || chatLoading) return
+    if (!chatApiKey) return
     const userMsg = chatInput.trim()
     setChatInput("")
     setChatMsgs(prev => [...prev, { role: "user", text: userMsg }])
@@ -2319,7 +2326,12 @@ function MainApp({ user, onLogout }) {
 
       const res = await fetch("https://api.anthropic.com/v1/messages", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": chatApiKey,
+          "anthropic-version": "2023-06-01",
+          "anthropic-dangerous-direct-browser-access": "true"
+        },
         body: JSON.stringify({
           model: "claude-sonnet-4-20250514",
           max_tokens: 1000,
@@ -2329,10 +2341,14 @@ function MainApp({ user, onLogout }) {
       })
 
       const data = await res.json()
-      const reply = data.content ? data.content.map(b => b.text || "").join("") : "Error: sin respuesta"
-      setChatMsgs(prev => [...prev, { role: "assistant", text: reply }])
+      if (data.error) {
+        setChatMsgs(prev => [...prev, { role: "assistant", text: "Error: " + (data.error.message || JSON.stringify(data.error)) }])
+      } else {
+        const reply = data.content ? data.content.map(b => b.text || "").join("") : "Sin respuesta"
+        setChatMsgs(prev => [...prev, { role: "assistant", text: reply }])
+      }
     } catch (e) {
-      setChatMsgs(prev => [...prev, { role: "assistant", text: "Error: " + e.message }])
+      setChatMsgs(prev => [...prev, { role: "assistant", text: "Error de conexión: " + e.message }])
     }
     finally { setChatLoading(false) }
   }
@@ -3726,63 +3742,114 @@ function MainApp({ user, onLogout }) {
         {chatOpen ? "+" : "🤖"}
       </div>
 
-      {/* ── AI Chat panel ── */}
+      {/* ── AI Chat panel (draggable) ── */}
       {chatOpen && (
-        <div style={{ position: "fixed", bottom: 88, right: 24, width: 380, maxWidth: "calc(100vw - 48px)", height: 520, maxHeight: "calc(100vh - 120px)", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 16, zIndex: 998, display: "flex", flexDirection: "column", boxShadow: "0 8px 40px rgba(0,0,0,.5)" }}>
-          {/* Chat header */}
-          <div style={{ padding: "14px 16px", borderBottom: "1px solid var(--border)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <div style={{
+          position: "fixed",
+          bottom: chatPos.y !== null ? "auto" : 88,
+          right: chatPos.x !== null ? "auto" : 24,
+          top: chatPos.y !== null ? chatPos.y : "auto",
+          left: chatPos.x !== null ? chatPos.x : "auto",
+          width: 400, maxWidth: "calc(100vw - 48px)", height: 560, maxHeight: "calc(100vh - 100px)",
+          background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 16, zIndex: 998,
+          display: "flex", flexDirection: "column", boxShadow: "0 8px 40px rgba(0,0,0,.5)"
+        }}>
+          {/* Chat header (drag handle) */}
+          <div style={{ padding: "12px 16px", borderBottom: "1px solid var(--border)", display: "flex", justifyContent: "space-between", alignItems: "center", cursor: "grab", userSelect: "none" }}
+            onMouseDown={e => {
+              setChatDragging(true)
+              const rect = e.currentTarget.closest("div[style]").parentElement.querySelector(":scope > div:last-of-type") ? e.currentTarget.parentElement.getBoundingClientRect() : e.currentTarget.parentElement.getBoundingClientRect()
+              const parent = e.currentTarget.parentElement
+              const pr = parent.getBoundingClientRect()
+              chatDragOffset.current = { x: e.clientX - pr.left, y: e.clientY - pr.top }
+              const onMove = ev => { setChatPos({ x: ev.clientX - chatDragOffset.current.x, y: ev.clientY - chatDragOffset.current.y }) }
+              const onUp = () => { setChatDragging(false); window.removeEventListener("mousemove", onMove); window.removeEventListener("mouseup", onUp) }
+              window.addEventListener("mousemove", onMove)
+              window.addEventListener("mouseup", onUp)
+            }}>
             <div>
               <div style={{ fontFamily: "var(--mono)", fontWeight: 700, fontSize: 13, color: "var(--accent)" }}>🤖 Trading Coach AI</div>
-              <div style={{ fontSize: 10, color: "var(--text3)" }}>{modeLabel} • {stats.total} trades cargados</div>
+              <div style={{ fontSize: 10, color: "var(--text3)" }}>{modeLabel} • {trades.length} trades</div>
             </div>
             <div style={{ display: "flex", gap: 6 }}>
               <button onClick={() => setChatMsgs([])} style={{ background: "none", border: "none", color: "var(--text3)", cursor: "pointer", fontSize: 11 }} title="Limpiar chat">🗑</button>
-              <button onClick={() => setChatOpen(false)} style={{ background: "none", border: "none", color: "var(--text3)", cursor: "pointer", fontSize: 14 }}>✕</button>
+              <button onClick={() => { setChatPos({ x: null, y: null }); setChatOpen(false) }} style={{ background: "none", border: "none", color: "var(--text3)", cursor: "pointer", fontSize: 14 }}>✕</button>
             </div>
           </div>
 
-          {/* Chat messages */}
-          <div style={{ flex: 1, overflowY: "auto", padding: "12px 14px", display: "flex", flexDirection: "column", gap: 10 }}>
-            {chatMsgs.length === 0 && (
-              <div style={{ textAlign: "center", padding: "30px 10px", color: "var(--text3)" }}>
-                <div style={{ fontSize: 32, marginBottom: 8 }}>🤖</div>
-                <div style={{ fontSize: 13, marginBottom: 12 }}>Pregúntame sobre tu trading</div>
-                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                  {["¿Cómo fue mi semana?", "¿Cuál es mi mejor setup?", "Analiza mis BEs", "¿A qué hora opero mejor?", "Dame un resumen general"].map(q => (
-                    <div key={q} onClick={() => { setChatInput(q); }} style={{ padding: "6px 10px", background: "var(--bg)", borderRadius: 6, fontSize: 11, color: "var(--accent)", cursor: "pointer", border: "1px solid var(--border)" }}>{q}</div>
-                  ))}
-                </div>
+          {/* API Key setup (if no key) */}
+          {!chatApiKey ? (
+            <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: 24 }}>
+              <div style={{ fontSize: 40, marginBottom: 12 }}>🔑</div>
+              <div style={{ fontSize: 14, fontWeight: 600, color: "var(--text)", marginBottom: 4, textAlign: "center" }}>API Key requerida</div>
+              <div style={{ fontSize: 11, color: "var(--text3)", marginBottom: 16, textAlign: "center", lineHeight: 1.5 }}>
+                Necesitas una API key de Anthropic para usar el chat AI. Cada usuario usa su propia key.<br />
+                Ve a <span style={{ color: "var(--accent)" }}>console.anthropic.com</span> para crear una.
               </div>
-            )}
-            {chatMsgs.map((m, i) => (
-              <div key={i} style={{ display: "flex", justifyContent: m.role === "user" ? "flex-end" : "flex-start" }}>
-                <div style={{
-                  maxWidth: "85%", padding: "8px 12px", borderRadius: 12,
-                  background: m.role === "user" ? "var(--ad)" : "var(--bg)",
-                  color: m.role === "user" ? "var(--accent)" : "var(--text)",
-                  fontSize: 12, lineHeight: 1.5, whiteSpace: "pre-wrap", wordBreak: "break-word"
-                }}>
-                  {m.text}
-                </div>
+              <input className="inp" type="password" placeholder="sk-ant-..." style={{ width: "100%", fontSize: 12, marginBottom: 10 }}
+                onChange={e => {
+                  const val = e.target.value.trim()
+                  if (val.startsWith("sk-ant-")) {
+                    setChatApiKey(val)
+                    try { localStorage.setItem("mjp_ai_key", val) } catch {}
+                  }
+                }}
+              />
+              <div style={{ fontSize: 9, color: "var(--text3)", textAlign: "center" }}>Se guarda solo en tu browser. No se comparte con nadie.</div>
+            </div>
+          ) : (
+            <>
+              {/* Chat messages */}
+              <div style={{ flex: 1, overflowY: "auto", padding: "12px 14px", display: "flex", flexDirection: "column", gap: 10 }}>
+                {chatMsgs.length === 0 && (
+                  <div style={{ textAlign: "center", padding: "20px 10px", color: "var(--text3)" }}>
+                    <div style={{ fontSize: 32, marginBottom: 8 }}>🤖</div>
+                    <div style={{ fontSize: 13, marginBottom: 12 }}>Pregúntame sobre tu trading</div>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                      {["¿Cómo fue mi semana?", "¿Cuál es mi mejor setup?", "Analiza mis BEs", "¿A qué hora opero mejor?", "Dame un resumen general"].map(q => (
+                        <div key={q} onClick={() => { setChatInput(q) }} style={{ padding: "6px 10px", background: "var(--bg)", borderRadius: 6, fontSize: 11, color: "var(--accent)", cursor: "pointer", border: "1px solid var(--border)" }}>{q}</div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {chatMsgs.map((m, i) => (
+                  <div key={i} style={{ display: "flex", justifyContent: m.role === "user" ? "flex-end" : "flex-start" }}>
+                    <div style={{
+                      maxWidth: "85%", padding: "8px 12px", borderRadius: 12,
+                      background: m.role === "user" ? "var(--ad)" : "var(--bg)",
+                      color: m.role === "user" ? "var(--accent)" : "var(--text)",
+                      fontSize: 12, lineHeight: 1.5, whiteSpace: "pre-wrap", wordBreak: "break-word"
+                    }}>
+                      {m.text}
+                    </div>
+                  </div>
+                ))}
+                {chatLoading && (
+                  <div style={{ display: "flex", justifyContent: "flex-start" }}>
+                    <div style={{ padding: "8px 12px", background: "var(--bg)", borderRadius: 12, fontSize: 12, color: "var(--text3)" }}>Analizando tus datos...</div>
+                  </div>
+                )}
+                <div ref={chatEndRef} />
               </div>
-            ))}
-            {chatLoading && (
-              <div style={{ display: "flex", justifyContent: "flex-start" }}>
-                <div style={{ padding: "8px 12px", background: "var(--bg)", borderRadius: 12, fontSize: 12, color: "var(--text3)" }}>Analizando...</div>
-              </div>
-            )}
-            <div ref={chatEndRef} />
-          </div>
 
-          {/* Chat input */}
-          <div style={{ padding: "10px 14px", borderTop: "1px solid var(--border)", display: "flex", gap: 8 }}>
-            <input className="inp" value={chatInput} onChange={e => setChatInput(e.target.value)}
-              onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendChat() } }}
-              placeholder="Pregunta sobre tu trading..."
-              style={{ flex: 1, fontSize: 12, padding: "8px 10px" }} />
-            <button onClick={sendChat} disabled={chatLoading || !chatInput.trim()}
-              style={{ background: "var(--accent)", color: "#fff", border: "none", borderRadius: 8, padding: "0 14px", cursor: "pointer", fontWeight: 700, fontSize: 13, opacity: chatLoading || !chatInput.trim() ? 0.5 : 1 }}>→</button>
-          </div>
+              {/* Chat input */}
+              <div style={{ padding: "10px 14px", borderTop: "1px solid var(--border)" }}>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <input className="inp" value={chatInput} onChange={e => setChatInput(e.target.value)}
+                    onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendChat() } }}
+                    placeholder="Pregunta sobre tu trading..."
+                    style={{ flex: 1, fontSize: 12, padding: "8px 10px" }} />
+                  <button onClick={sendChat} disabled={chatLoading || !chatInput.trim()}
+                    style={{ background: "var(--accent)", color: "#fff", border: "none", borderRadius: 8, padding: "0 14px", cursor: "pointer", fontWeight: 700, fontSize: 13, opacity: chatLoading || !chatInput.trim() ? 0.5 : 1 }}>→</button>
+                </div>
+                <div style={{ display: "flex", justifyContent: "space-between", marginTop: 6 }}>
+                  <span style={{ fontSize: 9, color: "var(--text3)" }}>Arrastra el header para mover</span>
+                  <button onClick={() => { setChatApiKey(""); try { localStorage.removeItem("mjp_ai_key") } catch {} }}
+                    style={{ background: "none", border: "none", color: "var(--text3)", cursor: "pointer", fontSize: 9 }}>Cambiar API key</button>
+                </div>
+              </div>
+            </>
+          )}
         </div>
       )}
     </>
