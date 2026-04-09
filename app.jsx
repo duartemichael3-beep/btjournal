@@ -39,7 +39,7 @@ const DFT = {
   hayNoticia: "NO", noticiaHora: "", noticiaImpacto: "", noticiaTipo: "",
   screenshot: null, screenshotPreview: null, notas: ""
 }
-// Trading hours 9:30 AM to 12:00 PM in 5-min intervals
+// Trading hours 9:30 AM to 12:00 PM in 1-min intervals
 const HRS = []
 for (let h = 9; h <= 11; h++) {
   const startM = h === 9 ? 30 : 0
@@ -195,30 +195,32 @@ function cS(trades) {
   const exp = Math.round((tR / t2.length) * 100) / 100
 
   let mxW = 0, mxL = 0, cW = 0, cL = 0
-  const sorted = [...t2].sort((a, b2) => safeDate(a.fecha) - safeDate(b2.fecha))
-  sorted.forEach(t => {
-    const r = gR(t)
-    if (r > 0) { cW++; cL = 0 }
-    else if (r < 0) { cL++; cW = 0 }
+  rs.forEach(r => {
+    if (r > 0) { cW++; cL = 0; if (cW > mxW) mxW = cW }
+    else if (r < 0) { cL++; cW = 0; if (cL > mxL) mxL = cL }
     else { cW = 0; cL = 0 }
-    mxW = Math.max(mxW, cW)
-    mxL = Math.max(mxL, cL)
   })
 
-  let pk = 0, mDD = 0, cm = 0
+  // Recovery factor & equity DD
+  const sorted = [...t2].sort((a, b2) => safeDate(a.fecha) - safeDate(b2.fecha))
+  let cum = 0, peak = 0, maxDD = 0
   sorted.forEach(t => {
-    cm += gR(t)
-    if (cm > pk) pk = cm
-    const dv = pk - cm
-    if (dv > mDD) mDD = dv
+    cum += gR(t)
+    if (cum > peak) peak = cum
+    const dd2 = peak - cum
+    if (dd2 > maxDD) maxDD = dd2
   })
+  const rf = maxDD > 0 ? Math.round(tR / maxDD * 100) / 100 : tR > 0 ? Infinity : 0
 
-  const rF = mDD > 0 ? Math.round(tR / mDD * 100) / 100 : tR > 0 ? Infinity : 0
+  // Sharpe
   const mn = tR / t2.length
   const va = rs.reduce((a, r) => a + Math.pow(r - mn, 2), 0) / rs.length
-  const sh = Math.sqrt(va) > 0 ? Math.round(mn / Math.sqrt(va) * 100) / 100 : 0
-  const avgW = w.length ? gw / w.length : 0
-  const avgL = l.length ? gl / l.length : 1
+  const sd = Math.sqrt(va)
+  const sh = sd > 0 ? Math.round(mn / sd * 100) / 100 : 0
+
+  // Payoff
+  const avgW = w.length ? w.reduce((a, r) => a + r, 0) / w.length : 0
+  const avgL = l.length ? Math.abs(l.reduce((a, r) => a + r, 0) / l.length) : 0
   const po = avgL > 0 ? Math.round(avgW / avgL * 100) / 100 : avgW > 0 ? Infinity : 0
 
   const dW = t2.filter(t => t.resultado === "WIN").map(t => pn(t.duracionTrade)).filter(v => v > 0)
@@ -229,105 +231,114 @@ function cS(trades) {
     total: t2.length, wins: w.length, losses: l.length, bes: b.length,
     winRate: Math.round(w.length / t2.length * 10000) / 100,
     totalR: tR, totalDollar: Math.round(tR * RV),
-    bestR: rs.length ? Math.max(...rs) : 0,
-    profitFactor: gl ? Math.round(gw / gl * 10000) / 10000 : gw > 0 ? Infinity : 0,
+    bestR: w.length ? Math.round(Math.max(...w) * 100) / 100 : 0,
+    profitFactor: gl > 0 ? Math.round(gw / gl * 100) / 100 : gw > 0 ? Infinity : 0,
     expectancy: exp, expectDollar: Math.round(exp * RV),
     avgDDpct: aDD,
-    avgDurWin: dW.length ? Math.round(dW.reduce((a, c) => a + c, 0) / dW.length) : 0,
-    avgDurSL: dS.length ? Math.round(dS.reduce((a, c) => a + c, 0) / dS.length) : 0,
-    avgDurBE: dB.length ? Math.round(dB.reduce((a, c) => a + c, 0) / dB.length) : 0,
+    avgDurWin: dW.length ? Math.round(dW.reduce((a, v) => a + v, 0) / dW.length) : 0,
+    avgDurSL: dS.length ? Math.round(dS.reduce((a, v) => a + v, 0) / dS.length) : 0,
+    avgDurBE: dB.length ? Math.round(dB.reduce((a, v) => a + v, 0) / dB.length) : 0,
     maxWinStreak: mxW, maxLossStreak: mxL,
     curWinStreak: cW, curLossStreak: cL,
-    recoveryFactor: rF, sharpeRatio: sh, payoffRatio: po,
+    recoveryFactor: rf, sharpeRatio: sh, payoffRatio: po,
     sampleValid: t2.length >= 30,
-    maxEquityDD: Math.round(mDD * 100) / 100
+    maxEquityDD: Math.round(maxDD * 100) / 100
   }
 }
 
 const grpBy = (trades, fn) => {
   const m = {}
-  rT(trades).forEach(t => {
+  trades.forEach(t => {
     const k = fn(t)
-    if (k) {
-      if (!m[k]) m[k] = []
-      m[k].push(t)
-    }
+    if (!k) return
+    if (!m[k]) m[k] = []
+    m[k].push(t)
   })
-  return Object.entries(m).sort((a, b) => b[0].localeCompare(a[0])).map(([k, ts]) => ({ key: k, ...cS(ts) }))
+  return Object.entries(m).sort((a, b) => b[0].localeCompare(a[0])).map(([key, ts]) => ({
+    key, trades: ts, ...cS(ts)
+  }))
 }
 
 function extraS(trades) {
-  const dflt = { bestDay: "-", worstDay: "-", avgOps: 0, bestWd: "-", worstWd: "-" }
   const t2 = rT(trades)
-  if (!t2.length) return dflt
+  if (!t2.length) return { bestDay: "-", worstDay: "-", avgOps: "0", bestWd: "-", worstWd: "-" }
+
   const bd = {}
   t2.forEach(t => {
-    if (t.fecha) {
-      if (!bd[t.fecha]) bd[t.fecha] = []
-      bd[t.fecha].push(t)
-    }
+    if (!t.fecha) return
+    if (!bd[t.fecha]) bd[t.fecha] = []
+    bd[t.fecha].push(t)
   })
+
   const dt = Object.entries(bd).map(([d, ts]) => ({ d, r: ts.reduce((a, t) => a + gR(t), 0) }))
-  if (!dt.length) return dflt
+  if (!dt.length) return { bestDay: "-", worstDay: "-", avgOps: "0", bestWd: "-", worstWd: "-" }
+
   const best = dt.reduce((a, x) => x.r > a.r ? x : a, dt[0])
   const worst = dt.reduce((a, x) => x.r < a.r ? x : a, dt[0])
+  const avgOps = (t2.length / dt.length).toFixed(1)
 
+  const dns = ["dom", "lun", "mar", "mié", "jue", "vie", "sáb"]
   const bw = {}
   t2.forEach(t => {
-    if (t.fecha) {
-      const wd = getDN(t.fecha)
-      if (wd) {
-        if (!bw[wd]) bw[wd] = []
-        bw[wd].push(t)
-      }
-    }
+    if (!t.fecha) return
+    const d = safeDate(t.fecha)
+    if (!d) return
+    const w = dns[d.getDay()]
+    if (!bw[w]) bw[w] = []
+    bw[w].push(t)
   })
+
   const wt = Object.entries(bw).map(([wd, ts]) => ({ wd, r: ts.reduce((a, t) => a + gR(t), 0) }))
-  const bestDay = `${fmtD(best.d)} (${best.r > 0 ? "+" : ""}${Math.round(best.r * 100) / 100}R)`
-  const worstDay = `${fmtD(worst.d)} (${worst.r > 0 ? "+" : ""}${Math.round(worst.r * 100) / 100}R)`
-  const avgOps = Math.round(t2.length / Object.keys(bd).length * 100) / 100
-  if (!wt.length) return { bestDay, worstDay, avgOps, bestWd: "-", worstWd: "-" }
+  if (!wt.length) return { bestDay: fmtD(best.d) + ` (${fmtR(Math.round(best.r * 100) / 100)})`,
+    worstDay: fmtD(worst.d) + ` (${fmtR(Math.round(worst.r * 100) / 100)})`,
+    avgOps, bestWd: "-", worstWd: "-" }
+
   const bestW = wt.reduce((a, x) => x.r > a.r ? x : a, wt[0])
   const worstW = wt.reduce((a, x) => x.r < a.r ? x : a, wt[0])
+
   return {
-    bestDay, worstDay, avgOps,
-    bestWd: `${bestW.wd} (${bestW.r > 0 ? "+" : ""}${Math.round(bestW.r * 100) / 100}R)`,
-    worstWd: `${worstW.wd} (${worstW.r > 0 ? "+" : ""}${Math.round(worstW.r * 100) / 100}R)`
+    bestDay: fmtD(best.d) + ` (${fmtR(Math.round(best.r * 100) / 100)})`,
+    worstDay: fmtD(worst.d) + ` (${fmtR(Math.round(worst.r * 100) / 100)})`,
+    avgOps,
+    bestWd: `${bestW.wd} (${fmtR(Math.round(bestW.r * 100) / 100)})`,
+    worstWd: `${worstW.wd} (${fmtR(Math.round(worstW.r * 100) / 100)})`
   }
 }
 
 function rDist(trades, field) {
   const vs = rT(trades).filter(t => t.resultado === "WIN").map(t => Math.round(pn(t[field]))).filter(v => v > 0)
-  if (!vs.length) return { lvl: [], cnt: [], pct: [] }
-  const mx = Math.max(...vs), lvl = [], cnt = [], pct = []
-  for (let r = 1; r <= Math.min(mx, 15); r++) {
+  if (!vs.length) return []
+  const dist = []
+  for (let r = 1; r <= 15; r++) {
     const c = vs.filter(v => v === r).length
-    lvl.push(r + "R"); cnt.push(c); pct.push(Math.round(c / vs.length * 10000) / 100)
+    if (c) dist.push({ r: r + "R", count: c, pct: Math.round(c / vs.length * 100) })
   }
-  if (vs.some(v => v > 15)) {
+  {
     const c = vs.filter(v => v > 15).length
-    lvl.push("16R+"); cnt.push(c); pct.push(Math.round(c / vs.length * 10000) / 100)
+    if (c) dist.push({ r: ">15R", count: c, pct: Math.round(c / vs.length * 100) })
   }
-  return { lvl, cnt, pct }
+  return dist
 }
 
 function hourAnalysis(trades) {
-  const bh = {}
-  rT(trades).forEach(t => {
+  const t2 = rT(trades)
+  if (!t2.length) return []
+  const m = {}
+  t2.forEach(t => {
     const b = hBucket(t.horaInicio)
-    if (b) {
-      if (!bh[b]) bh[b] = []
-      bh[b].push(t)
-    }
+    if (!b) return
+    if (!m[b]) m[b] = []
+    m[b].push(t)
   })
-  return Object.entries(bh).sort((a, b) => a[0].localeCompare(b[0])).map(([h, ts]) => {
+  return Object.entries(m).sort((a, b) => a[0].localeCompare(b[0])).map(([h, ts]) => {
     const s = cS(ts)
     const rm = ts.filter(t => t.resultado === "WIN").map(t => pn(t.rMaximo)).filter(v => v > 0)
     return {
-      hour: h, ...s,
-      avgRmax: rm.length ? Math.round(rm.reduce((a, c) => a + c, 0) / rm.length * 100) / 100 : 0
+      hour: fmt12(h), total: s.total, winRate: s.winRate, totalR: s.totalR,
+      profitFactor: s.profitFactor,
+      avgRMax: rm.length ? Math.round(rm.reduce((a, v) => a + v, 0) / rm.length * 100) / 100 : 0
     }
-  })
+  }).filter(x => x.total > 0)
 }
 
 function atrAnalysis(trades) {
@@ -518,6 +529,619 @@ function parseNT8CSV(csvText) {
   })
 
   return trades
+}
+
+// ═══════════════════════════════════════════════
+// ACCOUNT MANAGER HELPERS
+// ═══════════════════════════════════════════════
+const AM_BLOCK_COLORS = ["#4c9aff", "#a78bfa", "#00d68f", "#ffc048", "#ff4757", "#f472b6", "#38bdf8", "#fb923c"]
+const AM_DAYS = ["Lun", "Mar", "Mié", "Jue", "Vie"]
+
+const getMonday = (d) => {
+  const dt = new Date(d)
+  const day = dt.getDay()
+  const diff = day === 0 ? -6 : 1 - day
+  dt.setDate(dt.getDate() + diff)
+  return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, "0")}-${String(dt.getDate()).padStart(2, "0")}`
+}
+
+const getTodayDow = () => {
+  const d = new Date().getDay()
+  return d === 0 ? 6 : d - 1 // 0=lun, 4=vie, 5=sab, 6=dom
+}
+
+const PROP_FIRMS = ["Apex", "Bulenox", "TPT", "Topstep", "Otra"]
+
+// ═══════════════════════════════════════════════
+// ACCOUNT MANAGER MODAL
+// ═══════════════════════════════════════════════
+function AccountManager({ userId, onClose }) {
+  const [amTab, setAmTab] = useState("today")
+  const [blocks, setBlocks] = useState([])
+  const [accounts, setAccounts] = useState([])
+  const [schedule, setSchedule] = useState([])
+  const [compliance, setCompliance] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+
+  // Form states
+  const [newBlockName, setNewBlockName] = useState("")
+  const [newAccName, setNewAccName] = useState("")
+  const [newAccFirm, setNewAccFirm] = useState("Apex")
+  const [newAccSize, setNewAccSize] = useState("")
+  const [newAccDD, setNewAccDD] = useState("")
+  const [newAccBlock, setNewAccBlock] = useState("")
+  const [editingAcc, setEditingAcc] = useState(null)
+
+  // Week navigation
+  const [weekOffset, setWeekOffset] = useState(0)
+
+  const currentMonday = useMemo(() => {
+    const d = new Date()
+    d.setDate(d.getDate() + weekOffset * 7)
+    return getMonday(d)
+  }, [weekOffset])
+
+  const todayDow = getTodayDow()
+  const todayStr = new Date().toISOString().slice(0, 10)
+
+  // ── Load all AM data ──
+  const loadAM = useCallback(async () => {
+    try {
+      const [bRes, aRes, sRes, cRes] = await Promise.all([
+        supa(`am_blocks?user_id=eq.${userId}&select=*&order=created_at.asc`),
+        supa(`am_accounts?user_id=eq.${userId}&select=*&order=created_at.asc`),
+        supa(`am_schedule?user_id=eq.${userId}&week_start=eq.${currentMonday}&select=*`),
+        supa(`am_compliance?user_id=eq.${userId}&select=*&order=date.desc&limit=30`)
+      ])
+      const [bD, aD, sD, cD] = await Promise.all([bRes.json(), aRes.json(), sRes.json(), cRes.json()])
+      if (Array.isArray(bD)) setBlocks(bD)
+      if (Array.isArray(aD)) setAccounts(aD)
+      if (Array.isArray(sD)) setSchedule(sD)
+      if (Array.isArray(cD)) setCompliance(cD)
+    } catch (e) { console.error("AM load error", e) }
+    finally { setLoading(false) }
+  }, [userId, currentMonday])
+
+  useEffect(() => { loadAM() }, [loadAM])
+
+  // ── Block CRUD ──
+  const addBlock = async () => {
+    if (!newBlockName.trim()) return
+    setSaving(true)
+    const color = AM_BLOCK_COLORS[blocks.length % AM_BLOCK_COLORS.length]
+    await supa("am_blocks", { method: "POST", body: JSON.stringify({ user_id: userId, name: newBlockName.trim(), color }) })
+    setNewBlockName("")
+    await loadAM()
+    setSaving(false)
+  }
+
+  const deleteBlock = async (id) => {
+    if (!confirm("Eliminar bloque? Las cuentas quedarán sin bloque.")) return
+    await supa(`am_blocks?id=eq.${id}`, { method: "DELETE" })
+    await loadAM()
+  }
+
+  // ── Account CRUD ──
+  const addAccount = async () => {
+    if (!newAccName.trim()) return
+    setSaving(true)
+    await supa("am_accounts", { method: "POST", body: JSON.stringify({
+      user_id: userId, name: newAccName.trim(), prop_firm: newAccFirm,
+      account_size: pn(newAccSize), max_dd: pn(newAccDD),
+      current_balance: pn(newAccSize), status: "active",
+      block_id: newAccBlock ? parseInt(newAccBlock) : null
+    })})
+    setNewAccName(""); setNewAccSize(""); setNewAccDD(""); setNewAccBlock("")
+    await loadAM()
+    setSaving(false)
+  }
+
+  const deleteAccount = async (id) => {
+    if (!confirm("Eliminar cuenta?")) return
+    await supa(`am_accounts?id=eq.${id}`, { method: "DELETE" })
+    await loadAM()
+  }
+
+  const updateAccount = async (id, fields) => {
+    setSaving(true)
+    await supa(`am_accounts?id=eq.${id}`, { method: "PATCH", body: JSON.stringify(fields) })
+    await loadAM()
+    setSaving(false)
+    setEditingAcc(null)
+  }
+
+  // ── Schedule ──
+  const setDayBlock = async (dow, blockId) => {
+    setSaving(true)
+    const existing = schedule.find(s => s.day_of_week === dow)
+    if (existing) {
+      if (blockId) {
+        await supa(`am_schedule?id=eq.${existing.id}`, { method: "PATCH", body: JSON.stringify({ block_id: blockId }) })
+      } else {
+        await supa(`am_schedule?id=eq.${existing.id}`, { method: "DELETE" })
+      }
+    } else if (blockId) {
+      await supa("am_schedule", { method: "POST", body: JSON.stringify({ user_id: userId, week_start: currentMonday, day_of_week: dow, block_id: blockId }) })
+    }
+    await loadAM()
+    setSaving(false)
+  }
+
+  // Copy schedule to next week
+  const copyToNextWeek = async () => {
+    if (!schedule.length) return alert("No hay schedule esta semana para copiar")
+    setSaving(true)
+    const nextMon = new Date(currentMonday + "T12:00:00")
+    nextMon.setDate(nextMon.getDate() + 7)
+    const nextMonStr = `${nextMon.getFullYear()}-${String(nextMon.getMonth() + 1).padStart(2, "0")}-${String(nextMon.getDate()).padStart(2, "0")}`
+    // Delete existing next week
+    await supa(`am_schedule?user_id=eq.${userId}&week_start=eq.${nextMonStr}`, { method: "DELETE" })
+    // Copy
+    for (const s of schedule) {
+      await supa("am_schedule", { method: "POST", body: JSON.stringify({ user_id: userId, week_start: nextMonStr, day_of_week: s.day_of_week, block_id: s.block_id }) })
+    }
+    await loadAM()
+    setSaving(false)
+    alert("Schedule copiado a la proxima semana!")
+  }
+
+  // Rotate schedule to next week (swap blocks)
+  const rotateToNextWeek = async () => {
+    if (!schedule.length) return alert("No hay schedule esta semana para rotar")
+    if (blocks.length < 2) return alert("Necesitas al menos 2 bloques para rotar")
+    setSaving(true)
+    const nextMon = new Date(currentMonday + "T12:00:00")
+    nextMon.setDate(nextMon.getDate() + 7)
+    const nextMonStr = `${nextMon.getFullYear()}-${String(nextMon.getMonth() + 1).padStart(2, "0")}-${String(nextMon.getDate()).padStart(2, "0")}`
+    await supa(`am_schedule?user_id=eq.${userId}&week_start=eq.${nextMonStr}`, { method: "DELETE" })
+    // Build rotation map: each block maps to the next one
+    const bIds = blocks.map(b => b.id)
+    const rotMap = {}
+    bIds.forEach((id, i) => { rotMap[id] = bIds[(i + 1) % bIds.length] })
+    for (const s of schedule) {
+      const newBlock = rotMap[s.block_id] || s.block_id
+      await supa("am_schedule", { method: "POST", body: JSON.stringify({ user_id: userId, week_start: nextMonStr, day_of_week: s.day_of_week, block_id: newBlock }) })
+    }
+    await loadAM()
+    setSaving(false)
+    alert("Schedule rotado a la proxima semana!")
+  }
+
+  // ── Compliance ──
+  const markCompliance = async (complied, note) => {
+    setSaving(true)
+    const todaySchedule = schedule.find(s => s.day_of_week === todayDow)
+    const body = {
+      user_id: userId, date: todayStr,
+      scheduled_block_id: todaySchedule ? todaySchedule.block_id : null,
+      operated_block_id: todaySchedule ? todaySchedule.block_id : null,
+      complied, violation_note: note || ""
+    }
+    const existing = compliance.find(c => c.date === todayStr)
+    if (existing) {
+      await supa(`am_compliance?id=eq.${existing.id}`, { method: "PATCH", body: JSON.stringify(body) })
+    } else {
+      await supa("am_compliance", { method: "POST", body: JSON.stringify(body) })
+    }
+    await loadAM()
+    setSaving(false)
+  }
+
+  // ── Derived data ──
+  const todaySchedule = schedule.find(s => s.day_of_week === todayDow)
+  const todayBlock = todaySchedule ? blocks.find(b => b.id === todaySchedule.block_id) : null
+  const todayAccounts = todayBlock ? accounts.filter(a => a.block_id === todayBlock.id) : []
+  const lockedAccounts = todayBlock ? accounts.filter(a => a.block_id && a.block_id !== todayBlock.id) : accounts
+  const todayCompliance = compliance.find(c => c.date === todayStr)
+  const isWeekend = todayDow >= 5
+
+  // Compliance stats
+  const complianceRate = useMemo(() => {
+    if (!compliance.length) return 0
+    const complied = compliance.filter(c => c.complied).length
+    return Math.round(complied / compliance.length * 100)
+  }, [compliance])
+
+  const getBlockById = id => blocks.find(b => b.id === id)
+
+  // ── RENDER ──
+  const tabStyle = (t) => ({
+    flex: 1, padding: "8px 0", border: "none", borderRadius: 6, cursor: "pointer",
+    fontFamily: "var(--mono)", fontSize: 11, fontWeight: 700,
+    background: amTab === t ? "var(--ad)" : "transparent",
+    color: amTab === t ? "var(--accent)" : "var(--text3)"
+  })
+
+  const inputStyle = { background: "var(--bg)", border: "1px solid var(--border2)", borderRadius: 7, color: "var(--text)", padding: "8px 10px", fontFamily: "inherit", fontSize: 12, width: "100%", outline: "none" }
+
+  if (loading) return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.85)", zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center" }}>
+      <div style={{ color: "var(--text3)", fontFamily: "var(--mono)" }}>Cargando...</div>
+    </div>
+  )
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.85)", zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }} onClick={onClose}>
+      <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 16, padding: 0, width: "100%", maxWidth: 800, maxHeight: "90vh", overflow: "hidden", display: "flex", flexDirection: "column" }} onClick={e => e.stopPropagation()}>
+
+        {/* Header */}
+        <div style={{ padding: "18px 22px 14px", borderBottom: "1px solid var(--border)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <div>
+            <h2 style={{ fontSize: 18, fontWeight: 700, fontFamily: "var(--mono)", color: "var(--accent)", margin: 0 }}>📊 Account Manager</h2>
+            <p style={{ fontSize: 11, color: "var(--text3)", marginTop: 2 }}>Gestiona tus bloques y cuentas</p>
+          </div>
+          <button onClick={onClose} style={{ background: "none", border: "1px solid var(--border2)", borderRadius: 6, color: "var(--text3)", cursor: "pointer", padding: "4px 10px", fontSize: 14 }}>✕</button>
+        </div>
+
+        {/* Tabs */}
+        <div style={{ padding: "10px 22px 0", display: "flex", gap: 2, background: "var(--bg)", margin: "0 22px", borderRadius: 8, marginTop: 12 }}>
+          <button onClick={() => setAmTab("today")} style={tabStyle("today")}>Hoy</button>
+          <button onClick={() => setAmTab("schedule")} style={tabStyle("schedule")}>Semana</button>
+          <button onClick={() => setAmTab("accounts")} style={tabStyle("accounts")}>Cuentas</button>
+          <button onClick={() => setAmTab("blocks")} style={tabStyle("blocks")}>Bloques</button>
+          <button onClick={() => setAmTab("history")} style={tabStyle("history")}>Historial</button>
+        </div>
+
+        {/* Content */}
+        <div style={{ flex: 1, overflow: "auto", padding: "16px 22px 22px" }}>
+
+          {saving && <div style={{ textAlign: "center", padding: 6, color: "var(--accent)", fontFamily: "var(--mono)", fontSize: 11, marginBottom: 8 }}>Guardando...</div>}
+
+{/* ══════ TAB: HOY ══════ */}
+{amTab === "today" && (
+  <div>
+    {isWeekend ? (
+      <div style={{ textAlign: "center", padding: 40 }}>
+        <div style={{ fontSize: 40, marginBottom: 12 }}>🏖️</div>
+        <div style={{ fontFamily: "var(--mono)", fontSize: 16, color: "var(--text2)", fontWeight: 700 }}>Fin de semana</div>
+        <div style={{ fontSize: 12, color: "var(--text3)", marginTop: 6 }}>No hay cuentas programadas hoy</div>
+      </div>
+    ) : !blocks.length ? (
+      <div style={{ textAlign: "center", padding: 40 }}>
+        <div style={{ fontSize: 40, marginBottom: 12 }}>⚡</div>
+        <div style={{ fontFamily: "var(--mono)", fontSize: 14, color: "var(--text2)" }}>Configura tus bloques primero</div>
+        <button onClick={() => setAmTab("blocks")} style={{ marginTop: 12, padding: "8px 20px", background: "var(--ad)", color: "var(--accent)", border: "none", borderRadius: 7, cursor: "pointer", fontFamily: "var(--mono)", fontSize: 12, fontWeight: 600 }}>Ir a Bloques</button>
+      </div>
+    ) : !todayBlock ? (
+      <div style={{ textAlign: "center", padding: 40 }}>
+        <div style={{ fontSize: 40, marginBottom: 12 }}>📅</div>
+        <div style={{ fontFamily: "var(--mono)", fontSize: 14, color: "var(--text2)" }}>No hay bloque asignado para hoy ({AM_DAYS[todayDow]})</div>
+        <button onClick={() => setAmTab("schedule")} style={{ marginTop: 12, padding: "8px 20px", background: "var(--ad)", color: "var(--accent)", border: "none", borderRadius: 7, cursor: "pointer", fontFamily: "var(--mono)", fontSize: 12, fontWeight: 600 }}>Configurar Semana</button>
+      </div>
+    ) : (
+      <>
+        {/* Today's block banner */}
+        <div style={{ background: todayBlock.color + "18", border: `2px solid ${todayBlock.color}`, borderRadius: 12, padding: "16px 20px", marginBottom: 16, textAlign: "center" }}>
+          <div style={{ fontSize: 11, color: "var(--text3)", fontFamily: "var(--mono)", fontWeight: 600, textTransform: "uppercase", letterSpacing: 1 }}>Hoy operas</div>
+          <div style={{ fontSize: 28, fontWeight: 700, fontFamily: "var(--mono)", color: todayBlock.color, marginTop: 4 }}>{todayBlock.name}</div>
+          <div style={{ fontSize: 12, color: "var(--text2)", marginTop: 4 }}>{AM_DAYS[todayDow]} — {todayAccounts.length} cuenta{todayAccounts.length !== 1 ? "s" : ""}</div>
+        </div>
+
+        {/* Active accounts table */}
+        {todayAccounts.length > 0 && (
+          <div style={{ marginBottom: 16 }}>
+            <div style={{ fontSize: 11, fontFamily: "var(--mono)", color: "var(--green)", fontWeight: 700, marginBottom: 8, textTransform: "uppercase", letterSpacing: .8 }}>🟢 Cuentas Activas</div>
+            <table className="tbl">
+              <thead><tr><th>Cuenta</th><th>Firma</th><th>Balance</th><th>DD Max</th><th>DD Disp.</th><th>Estado</th></tr></thead>
+              <tbody>
+                {todayAccounts.map(a => {
+                  const ddUsed = a.account_size - a.current_balance
+                  const ddAvail = a.max_dd - ddUsed
+                  const ddPct = a.max_dd > 0 ? ddAvail / a.max_dd * 100 : 100
+                  const ddColor = ddPct > 50 ? "var(--green)" : ddPct > 25 ? "var(--yellow)" : "var(--red)"
+                  const statusColor = a.status === "active" ? "var(--green)" : a.status === "passed" ? "var(--accent)" : a.status === "violated" ? "var(--red)" : "var(--text3)"
+                  return (
+                    <tr key={a.id}>
+                      <td style={{ fontFamily: "var(--mono)", fontWeight: 600, fontSize: 12 }}>{a.name}</td>
+                      <td style={{ fontSize: 11, color: "var(--text2)" }}>{a.prop_firm}</td>
+                      <td style={{ fontFamily: "var(--mono)", fontSize: 12 }}>{fmt$(a.current_balance)}</td>
+                      <td style={{ fontFamily: "var(--mono)", fontSize: 12 }}>{fmt$(a.max_dd)}</td>
+                      <td style={{ fontFamily: "var(--mono)", fontSize: 12, fontWeight: 700, color: ddColor }}>{fmt$(Math.round(ddAvail))} <span style={{ fontSize: 9, fontWeight: 400 }}>({ddPct.toFixed(0)}%)</span></td>
+                      <td><span style={{ padding: "2px 8px", borderRadius: 4, fontSize: 10, fontWeight: 600, fontFamily: "var(--mono)", background: statusColor + "18", color: statusColor, textTransform: "uppercase" }}>{a.status}</span></td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {/* Locked accounts */}
+        {lockedAccounts.length > 0 && (
+          <div style={{ marginBottom: 16 }}>
+            <div style={{ fontSize: 11, fontFamily: "var(--mono)", color: "var(--red)", fontWeight: 700, marginBottom: 8, textTransform: "uppercase", letterSpacing: .8 }}>🔒 Bloqueadas Hoy</div>
+            <div style={{ background: "rgba(255,71,87,.06)", border: "1px solid rgba(255,71,87,.15)", borderRadius: 10, padding: 12 }}>
+              {lockedAccounts.map(a => {
+                const blk = getBlockById(a.block_id)
+                return (
+                  <div key={a.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "6px 0", borderBottom: "1px solid rgba(255,71,87,.08)", opacity: 0.5 }}>
+                    <span style={{ fontFamily: "var(--mono)", fontSize: 12 }}>🔒 {a.name}</span>
+                    <span style={{ fontSize: 10, color: "var(--text3)" }}>{blk ? blk.name : "Sin bloque"} — {a.prop_firm}</span>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* Compliance section */}
+        <div style={{ background: "var(--bg)", borderRadius: 10, padding: 16, marginTop: 8 }}>
+          <div style={{ fontSize: 11, fontFamily: "var(--mono)", color: "var(--text3)", fontWeight: 600, marginBottom: 10, textTransform: "uppercase" }}>Cumplimiento de hoy</div>
+          {todayCompliance ? (
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <span style={{ fontSize: 20 }}>{todayCompliance.complied ? "✅" : "❌"}</span>
+              <span style={{ fontFamily: "var(--mono)", fontSize: 13, color: todayCompliance.complied ? "var(--green)" : "var(--red)", fontWeight: 700 }}>
+                {todayCompliance.complied ? "Plan cumplido" : "Violación registrada"}
+              </span>
+              {todayCompliance.violation_note && <span style={{ fontSize: 11, color: "var(--text3)" }}>— {todayCompliance.violation_note}</span>}
+            </div>
+          ) : (
+            <div style={{ display: "flex", gap: 8 }}>
+              <button onClick={() => markCompliance(true)} style={{ flex: 1, padding: "10px 0", background: "var(--gd)", color: "var(--green)", border: "1px solid rgba(0,214,143,.2)", borderRadius: 8, cursor: "pointer", fontFamily: "var(--mono)", fontSize: 12, fontWeight: 700 }}>✅ Cumplí el plan</button>
+              <button onClick={() => {
+                const note = prompt("¿Qué pasó? (nota opcional)")
+                markCompliance(false, note || "")
+              }} style={{ flex: 1, padding: "10px 0", background: "var(--rd)", color: "var(--red)", border: "1px solid rgba(255,71,87,.2)", borderRadius: 8, cursor: "pointer", fontFamily: "var(--mono)", fontSize: 12, fontWeight: 700 }}>❌ No cumplí</button>
+            </div>
+          )}
+          <div style={{ marginTop: 10, fontSize: 11, color: "var(--text3)", fontFamily: "var(--mono)" }}>Tasa de cumplimiento: <b style={{ color: complianceRate >= 80 ? "var(--green)" : complianceRate >= 50 ? "var(--yellow)" : "var(--red)" }}>{complianceRate}%</b> ({compliance.length} dias)</div>
+        </div>
+      </>
+    )}
+  </div>
+)}
+
+{/* ══════ TAB: SEMANA (Schedule) ══════ */}
+{amTab === "schedule" && (
+  <div>
+    {/* Week navigator */}
+    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+      <button onClick={() => setWeekOffset(weekOffset - 1)} className="btn bo bx">&lt;</button>
+      <div style={{ textAlign: "center" }}>
+        <div style={{ fontFamily: "var(--mono)", fontWeight: 700, fontSize: 14 }}>Semana del {fmtD(currentMonday)}</div>
+        {weekOffset === 0 && <div style={{ fontSize: 10, color: "var(--green)", fontFamily: "var(--mono)" }}>Esta semana</div>}
+        {weekOffset === 1 && <div style={{ fontSize: 10, color: "var(--accent)", fontFamily: "var(--mono)" }}>Próxima semana</div>}
+      </div>
+      <button onClick={() => setWeekOffset(weekOffset + 1)} className="btn bo bx">&gt;</button>
+    </div>
+
+    {!blocks.length ? (
+      <div style={{ textAlign: "center", padding: 30, color: "var(--text3)" }}>
+        <p>Crea bloques primero para configurar el schedule</p>
+        <button onClick={() => setAmTab("blocks")} className="btn bp" style={{ marginTop: 10 }}>Ir a Bloques</button>
+      </div>
+    ) : (
+      <>
+        {/* Schedule grid */}
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 8, marginBottom: 16 }}>
+          {AM_DAYS.map((day, dow) => {
+            const sch = schedule.find(s => s.day_of_week === dow)
+            const blk = sch ? getBlockById(sch.block_id) : null
+            const isToday = weekOffset === 0 && dow === todayDow
+            return (
+              <div key={dow} style={{ background: blk ? blk.color + "12" : "var(--bg)", border: `2px solid ${isToday ? "var(--accent)" : blk ? blk.color + "40" : "var(--border)"}`, borderRadius: 10, padding: 12, textAlign: "center" }}>
+                <div style={{ fontSize: 10, fontFamily: "var(--mono)", color: isToday ? "var(--accent)" : "var(--text3)", fontWeight: 700, marginBottom: 8 }}>{day}{isToday ? " ●" : ""}</div>
+                <select
+                  value={sch ? sch.block_id : ""}
+                  onChange={e => setDayBlock(dow, e.target.value ? parseInt(e.target.value) : null)}
+                  style={{ width: "100%", padding: "6px 4px", background: "var(--surface)", border: "1px solid var(--border2)", borderRadius: 6, color: blk ? blk.color : "var(--text3)", fontFamily: "var(--mono)", fontSize: 11, fontWeight: 700, cursor: "pointer", textAlign: "center", outline: "none" }}
+                >
+                  <option value="">—</option>
+                  {blocks.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+                </select>
+                {blk && (
+                  <div style={{ marginTop: 6, fontSize: 9, color: "var(--text3)" }}>
+                    {accounts.filter(a => a.block_id === blk.id).length} cuentas
+                  </div>
+                )}
+              </div>
+            )
+          })}
+        </div>
+
+        {/* Actions */}
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <button onClick={copyToNextWeek} className="btn bo" style={{ fontSize: 11 }}>📋 Copiar a próxima semana</button>
+          <button onClick={rotateToNextWeek} className="btn bo" style={{ fontSize: 11 }}>🔄 Rotar a próxima semana</button>
+          <button onClick={() => setWeekOffset(0)} className="btn bo" style={{ fontSize: 11 }}>📍 Ir a esta semana</button>
+        </div>
+      </>
+    )}
+  </div>
+)}
+
+{/* ══════ TAB: CUENTAS ══════ */}
+{amTab === "accounts" && (
+  <div>
+    {/* Add account form */}
+    <div style={{ background: "var(--bg)", borderRadius: 10, padding: 14, marginBottom: 16 }}>
+      <div style={{ fontSize: 11, fontFamily: "var(--mono)", color: "var(--text3)", fontWeight: 600, marginBottom: 10, textTransform: "uppercase" }}>Nueva cuenta</div>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginBottom: 8 }}>
+        <input placeholder="Nombre (ej: APEX-1)" value={newAccName} onChange={e => setNewAccName(e.target.value)} style={inputStyle} />
+        <select value={newAccFirm} onChange={e => setNewAccFirm(e.target.value)} style={{ ...inputStyle, cursor: "pointer" }}>
+          {PROP_FIRMS.map(f => <option key={f} value={f}>{f}</option>)}
+        </select>
+        <select value={newAccBlock} onChange={e => setNewAccBlock(e.target.value)} style={{ ...inputStyle, cursor: "pointer" }}>
+          <option value="">Sin bloque</option>
+          {blocks.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+        </select>
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr auto", gap: 8 }}>
+        <input placeholder="Tamaño ($)" type="number" value={newAccSize} onChange={e => setNewAccSize(e.target.value)} style={inputStyle} />
+        <input placeholder="DD Máximo ($)" type="number" value={newAccDD} onChange={e => setNewAccDD(e.target.value)} style={inputStyle} />
+        <button onClick={addAccount} disabled={saving || !newAccName.trim()} style={{ padding: "8px 20px", background: "var(--accent)", color: "#fff", border: "none", borderRadius: 7, cursor: "pointer", fontFamily: "var(--mono)", fontSize: 12, fontWeight: 700, whiteSpace: "nowrap" }}>+ Agregar</button>
+      </div>
+    </div>
+
+    {/* Accounts list by block */}
+    {blocks.map(blk => {
+      const blkAccounts = accounts.filter(a => a.block_id === blk.id)
+      if (!blkAccounts.length) return null
+      return (
+        <div key={blk.id} style={{ marginBottom: 14 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+            <div style={{ width: 10, height: 10, borderRadius: 3, background: blk.color }} />
+            <span style={{ fontFamily: "var(--mono)", fontSize: 12, fontWeight: 700, color: blk.color }}>{blk.name}</span>
+            <span style={{ fontSize: 10, color: "var(--text3)" }}>{blkAccounts.length} cuenta{blkAccounts.length !== 1 ? "s" : ""}</span>
+          </div>
+          <div style={{ overflowX: "auto" }}>
+            <table className="tbl">
+              <thead><tr><th>Cuenta</th><th>Firma</th><th>Tamaño</th><th>Balance</th><th>DD Max</th><th>Estado</th><th></th></tr></thead>
+              <tbody>
+                {blkAccounts.map(a => (
+                  <tr key={a.id}>
+                    <td style={{ fontFamily: "var(--mono)", fontWeight: 600, fontSize: 12 }}>{a.name}</td>
+                    <td style={{ fontSize: 11, color: "var(--text2)" }}>{a.prop_firm}</td>
+                    <td style={{ fontFamily: "var(--mono)", fontSize: 11 }}>{fmt$(a.account_size)}</td>
+                    <td>
+                      {editingAcc === a.id ? (
+                        <input type="number" defaultValue={a.current_balance} style={{ ...inputStyle, width: 100, padding: "4px 6px", fontSize: 11 }}
+                          onBlur={e => updateAccount(a.id, { current_balance: pn(e.target.value) })}
+                          onKeyDown={e => { if (e.key === "Enter") updateAccount(a.id, { current_balance: pn(e.target.value) }) }}
+                          autoFocus />
+                      ) : (
+                        <span style={{ fontFamily: "var(--mono)", fontSize: 11, cursor: "pointer" }} onClick={() => setEditingAcc(a.id)}>{fmt$(a.current_balance)}</span>
+                      )}
+                    </td>
+                    <td style={{ fontFamily: "var(--mono)", fontSize: 11 }}>{fmt$(a.max_dd)}</td>
+                    <td>
+                      <select value={a.status} onChange={e => updateAccount(a.id, { status: e.target.value })}
+                        style={{ background: "var(--bg)", border: "1px solid var(--border2)", borderRadius: 4, color: a.status === "active" ? "var(--green)" : a.status === "passed" ? "var(--accent)" : a.status === "violated" ? "var(--red)" : "var(--text3)", fontFamily: "var(--mono)", fontSize: 10, padding: "2px 4px", cursor: "pointer" }}>
+                        <option value="active">Active</option>
+                        <option value="passed">Passed</option>
+                        <option value="violated">Violated</option>
+                        <option value="inactive">Inactive</option>
+                      </select>
+                    </td>
+                    <td>
+                      <div style={{ display: "flex", gap: 3 }}>
+                        <select value={a.block_id || ""} onChange={e => updateAccount(a.id, { block_id: e.target.value ? parseInt(e.target.value) : null })}
+                          style={{ background: "var(--bg)", border: "1px solid var(--border2)", borderRadius: 4, color: "var(--text2)", fontFamily: "var(--mono)", fontSize: 9, padding: "2px 4px", cursor: "pointer", maxWidth: 70 }}>
+                          <option value="">—</option>
+                          {blocks.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+                        </select>
+                        <button onClick={() => deleteAccount(a.id)} style={{ background: "var(--rd)", color: "var(--red)", border: "none", borderRadius: 4, cursor: "pointer", padding: "2px 6px", fontSize: 10 }}>X</button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )
+    })}
+
+    {/* Unassigned accounts */}
+    {accounts.filter(a => !a.block_id).length > 0 && (
+      <div style={{ marginBottom: 14 }}>
+        <div style={{ fontFamily: "var(--mono)", fontSize: 12, fontWeight: 700, color: "var(--text3)", marginBottom: 8 }}>Sin bloque asignado</div>
+        <table className="tbl">
+          <thead><tr><th>Cuenta</th><th>Firma</th><th>Tamaño</th><th>Asignar</th><th></th></tr></thead>
+          <tbody>
+            {accounts.filter(a => !a.block_id).map(a => (
+              <tr key={a.id}>
+                <td style={{ fontFamily: "var(--mono)", fontWeight: 600, fontSize: 12 }}>{a.name}</td>
+                <td style={{ fontSize: 11 }}>{a.prop_firm}</td>
+                <td style={{ fontFamily: "var(--mono)", fontSize: 11 }}>{fmt$(a.account_size)}</td>
+                <td>
+                  <select value="" onChange={e => updateAccount(a.id, { block_id: parseInt(e.target.value) })}
+                    style={{ ...inputStyle, padding: "4px 6px", fontSize: 10, width: "auto" }}>
+                    <option value="">Asignar a...</option>
+                    {blocks.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+                  </select>
+                </td>
+                <td><button onClick={() => deleteAccount(a.id)} style={{ background: "var(--rd)", color: "var(--red)", border: "none", borderRadius: 4, cursor: "pointer", padding: "2px 6px", fontSize: 10 }}>X</button></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    )}
+
+    {!accounts.length && <div style={{ textAlign: "center", padding: 20, color: "var(--text3)", fontSize: 12 }}>No hay cuentas. Agrega una arriba.</div>}
+  </div>
+)}
+
+{/* ══════ TAB: BLOQUES ══════ */}
+{amTab === "blocks" && (
+  <div>
+    {/* Add block */}
+    <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
+      <input placeholder="Nombre del bloque (ej: Bloque A)" value={newBlockName} onChange={e => setNewBlockName(e.target.value)}
+        onKeyDown={e => { if (e.key === "Enter") addBlock() }}
+        style={{ ...inputStyle, flex: 1 }} />
+      <button onClick={addBlock} disabled={saving || !newBlockName.trim()} style={{ padding: "8px 20px", background: "var(--accent)", color: "#fff", border: "none", borderRadius: 7, cursor: "pointer", fontFamily: "var(--mono)", fontSize: 12, fontWeight: 700, whiteSpace: "nowrap" }}>+ Crear</button>
+    </div>
+
+    {/* Blocks list */}
+    {blocks.map(blk => {
+      const blkAccs = accounts.filter(a => a.block_id === blk.id)
+      return (
+        <div key={blk.id} style={{ background: blk.color + "0a", border: `1px solid ${blk.color}30`, borderRadius: 10, padding: 14, marginBottom: 10 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <div style={{ width: 14, height: 14, borderRadius: 4, background: blk.color }} />
+              <span style={{ fontFamily: "var(--mono)", fontSize: 15, fontWeight: 700, color: blk.color }}>{blk.name}</span>
+            </div>
+            <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+              <span style={{ fontSize: 11, color: "var(--text3)", fontFamily: "var(--mono)" }}>{blkAccs.length} cuenta{blkAccs.length !== 1 ? "s" : ""}</span>
+              <button onClick={() => deleteBlock(blk.id)} style={{ background: "var(--rd)", color: "var(--red)", border: "none", borderRadius: 4, cursor: "pointer", padding: "3px 8px", fontSize: 10, fontFamily: "var(--mono)" }}>Eliminar</button>
+            </div>
+          </div>
+          {blkAccs.length > 0 && (
+            <div style={{ marginTop: 10, display: "flex", flexWrap: "wrap", gap: 6 }}>
+              {blkAccs.map(a => (
+                <span key={a.id} style={{ padding: "3px 10px", background: "var(--surface)", borderRadius: 6, fontSize: 11, fontFamily: "var(--mono)", color: "var(--text2)", border: "1px solid var(--border)" }}>
+                  {a.name} <span style={{ color: "var(--text3)", fontSize: 9 }}>{a.prop_firm}</span>
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
+      )
+    })}
+
+    {!blocks.length && <div style={{ textAlign: "center", padding: 20, color: "var(--text3)", fontSize: 12 }}>No hay bloques. Crea uno arriba.</div>}
+  </div>
+)}
+
+{/* ══════ TAB: HISTORIAL ══════ */}
+{amTab === "history" && (
+  <div>
+    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+      <div style={{ fontFamily: "var(--mono)", fontSize: 13, fontWeight: 700 }}>Historial de Cumplimiento</div>
+      <div style={{ fontFamily: "var(--mono)", fontSize: 12, color: complianceRate >= 80 ? "var(--green)" : complianceRate >= 50 ? "var(--yellow)" : "var(--red)", fontWeight: 700 }}>{complianceRate}%</div>
+    </div>
+
+    {compliance.length > 0 ? (
+      <table className="tbl">
+        <thead><tr><th>Fecha</th><th>Bloque</th><th>Cumplió</th><th>Nota</th></tr></thead>
+        <tbody>
+          {compliance.map(c => {
+            const blk = getBlockById(c.scheduled_block_id)
+            return (
+              <tr key={c.id}>
+                <td style={{ fontFamily: "var(--mono)", fontSize: 11 }}>{fmtD(c.date)}</td>
+                <td>{blk ? <span style={{ color: blk.color, fontFamily: "var(--mono)", fontSize: 11, fontWeight: 600 }}>{blk.name}</span> : <span style={{ color: "var(--text3)", fontSize: 11 }}>—</span>}</td>
+                <td style={{ fontSize: 16 }}>{c.complied ? "✅" : "❌"}</td>
+                <td style={{ fontSize: 11, color: "var(--text3)" }}>{c.violation_note || ""}</td>
+              </tr>
+            )
+          })}
+        </tbody>
+      </table>
+    ) : (
+      <div style={{ textAlign: "center", padding: 20, color: "var(--text3)", fontSize: 12 }}>Sin registros de cumplimiento aún</div>
+    )}
+  </div>
+)}
+
+        </div>
+      </div>
+    </div>
+  )
 }
 
 // ═══════════════════════════════════════════════
@@ -1224,6 +1848,7 @@ function MainApp({ user, onLogout }) {
   const [showNT8, setShowNT8] = useState(false)
   const [dayModal, setDayModal] = useState(null)
   const [showCard, setShowCard] = useState(false)
+  const [showAM, setShowAM] = useState(false)
   const [showLinkModal, setShowLinkModal] = useState(false)
   const [publicLink, setPublicLink] = useState("")
   const fileRef = useRef()
@@ -1788,6 +2413,8 @@ function MainApp({ user, onLogout }) {
       {dayModal && <DayModal date={dayModal} trades={trades} onClose={() => setDayModal(null)} onViewSS={setViewSS} />}
       {/* Team day detail modal */}
       {tDayModal && <DayModal date={tDayModal} trades={teamTrades} onClose={() => setTDayModal(null)} onViewSS={setViewSS} />}
+      {/* Account Manager modal */}
+      {showAM && <AccountManager userId={user.id} onClose={() => setShowAM(false)} />}
       {/* Mobile overlay */}
       {sb && window.innerWidth <= 900 && <div className="overlay" onClick={() => setSb(false)} />}
 
@@ -1849,6 +2476,7 @@ function MainApp({ user, onLogout }) {
       <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "flex-start" }}>
         <Filters />
         <div style={{ display: "flex", gap: 4, marginTop: 14 }}>
+          <button className="btn bo bx" style={{ fontSize: 10 }} onClick={() => setShowAM(true)}>📊 Cuentas</button>
           <button className="btn bo bx" style={{ fontSize: 10 }} onClick={() => setShowCard(true)}>📱 Card</button>
           <button className="btn bo bx" style={{ fontSize: 10 }} onClick={() => {
             const sType = fd1 || fd2 ? "daterange" : "all"
