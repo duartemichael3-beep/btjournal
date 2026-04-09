@@ -1143,7 +1143,7 @@ function fmtDateISO(d) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`
 }
 
-function AccountManager({ userId, onClose }) {
+function AccountManager({ userId, onClose, inline }) {
   const [amTab, setAmTab] = useState("today")
   const [blocks, setBlocks] = useState([])
   const [amAccounts, setAmAccounts] = useState([])
@@ -1331,16 +1331,19 @@ function AccountManager({ userId, onClose }) {
     </button>
   )
 
-  if (amLoading) return <div style={mBg}><div style={mBox}><div className="em">Cargando Account Manager...</div></div></div>
+  if (amLoading) {
+    if (inline) return <div className="em">Cargando Account Manager...</div>
+    return <div style={mBg}><div style={mBox}><div className="em">Cargando Account Manager...</div></div></div>
+  }
 
-  return (
-    <div style={mBg} onClick={onClose}>
-      <div style={mBox} onClick={e => e.stopPropagation()}>
-
+  const content = (
+    <>
+      {!inline && (
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
           <h2 style={{ fontSize: 20, fontWeight: 700, fontFamily: "var(--mono)", color: "var(--accent)" }}>📊 Account Manager</h2>
           <button className="btn bo bx" onClick={onClose}>✕</button>
         </div>
+      )}
 
         <div style={{ display: "flex", gap: 2, background: "var(--bg)", borderRadius: 8, padding: 3, marginBottom: 20 }}>
           {amTabBtn("today", "🎯 Hoy")}
@@ -1660,6 +1663,15 @@ function AccountManager({ userId, onClose }) {
             )}
           </div>
         )}
+      </>
+  )
+
+  if (inline) return content
+
+  return (
+    <div style={mBg} onClick={onClose}>
+      <div style={mBox} onClick={e => e.stopPropagation()}>
+        {content}
       </div>
     </div>
   )
@@ -1770,7 +1782,6 @@ function MainApp({ user, onLogout }) {
   const [showNT8, setShowNT8] = useState(false)
   const [dayModal, setDayModal] = useState(null)
   const [showCard, setShowCard] = useState(false)
-  const [showAM, setShowAM] = useState(false)
   const [showLinkModal, setShowLinkModal] = useState(false)
   const [publicLink, setPublicLink] = useState("")
   const fileRef = useRef()
@@ -2220,6 +2231,7 @@ function MainApp({ user, onLogout }) {
     { id: "setups", l: "Setups", i: "◆" },
     { id: "avanzado", l: "Avanzado", i: "◉" },
     { id: "tips", l: "Tips", i: "★" },
+    ...(appMode === "journal" ? [{ id: "acctmgr", l: "Cuentas", i: "📊" }] : []),
     { id: "team", l: "Team", i: "♦" },
     ...(isAdmin ? [{ id: "admin", l: "Admin", i: "⚙" }] : [])
   ]
@@ -2335,8 +2347,6 @@ function MainApp({ user, onLogout }) {
       {dayModal && <DayModal date={dayModal} trades={trades} onClose={() => setDayModal(null)} onViewSS={setViewSS} />}
       {/* Team day detail modal */}
       {tDayModal && <DayModal date={tDayModal} trades={teamTrades} onClose={() => setTDayModal(null)} onViewSS={setViewSS} />}
-      {/* Account Manager modal */}
-      {showAM && <AccountManager userId={user.id} onClose={() => setShowAM(false)} />}
       {/* Mobile overlay */}
       {sb && window.innerWidth <= 900 && <div className="overlay" onClick={() => setSb(false)} />}
 
@@ -2404,7 +2414,6 @@ function MainApp({ user, onLogout }) {
             const sFilter = fd1 || fd2 ? `${fd1}|${fd2}` : ""
             generatePublicLink(sType, sFilter)
           }}>🔗 Link</button>
-          <button className="btn bo bx" style={{ fontSize: 10 }} onClick={() => setShowAM(true)}>📊 Cuentas</button>
         </div>
       </div>
     </div>
@@ -2810,6 +2819,19 @@ function MainApp({ user, onLogout }) {
         </div>
       )
     }) : <div className="em">Min 5 trades</div>}
+  </>
+)}
+
+{/* ═══ TAB: ACCOUNT MANAGER (solo journal) ═══ */}
+{tab === "acctmgr" && appMode === "journal" && (
+  <>
+    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+      <div>
+        <h1 className="pt">Account Manager</h1>
+        <p className="ps">Gestión de bloques, cuentas y rotación semanal</p>
+      </div>
+    </div>
+    <AccountManager userId={user.id} inline />
   </>
 )}
 
