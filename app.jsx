@@ -690,25 +690,61 @@ const BC = ({ data, labels, height = 130, unit = "", colors }) => {
 // ═══════════════════════════════════════════════
 // DAY MODAL — click en un dia del calendario
 // ═══════════════════════════════════════════════
-function DayModal({ date, trades, onClose, onViewSS }) {
+function DayModal({ date, trades, onClose, onViewSS, onNavigate }) {
   const dt = trades.filter(t => t.fecha === date)
   const real = rT(dt)
   const sinop = dt.filter(isSO)
   const s = cS(real)
   const dayR = Math.round(real.reduce((a, t) => a + gR(t), 0) * 100) / 100
 
+  // Get sorted unique dates that have trades for navigation
+  const allDates = [...new Set(trades.filter(t => t.fecha).map(t => t.fecha))].sort()
+  const currentIdx = allDates.indexOf(date)
+  const prevDate = currentIdx > 0 ? allDates[currentIdx - 1] : null
+  const nextDate = currentIdx < allDates.length - 1 ? allDates[currentIdx + 1] : null
+
+  const goTo = (d) => { if (d && onNavigate) onNavigate(d) }
+
+  // Keyboard navigation
+  useEffect(() => {
+    const handleKey = (e) => {
+      if (e.key === "ArrowLeft" && prevDate) goTo(prevDate)
+      else if (e.key === "ArrowRight" && nextDate) goTo(nextDate)
+      else if (e.key === "Escape") onClose()
+    }
+    window.addEventListener("keydown", handleKey)
+    return () => window.removeEventListener("keydown", handleKey)
+  }, [prevDate, nextDate])
+
+  const navBtn = { background: "var(--surface2)", border: "1px solid var(--border)", borderRadius: 8, padding: "8px 14px", cursor: "pointer", color: "var(--text)", fontFamily: "var(--mono)", fontSize: 14, fontWeight: 700, display: "flex", alignItems: "center", gap: 6 }
+  const navBtnDisabled = { ...navBtn, opacity: 0.3, cursor: "default" }
+
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.85)", zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }} onClick={onClose}>
       <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 16, padding: 24, width: "100%", maxWidth: 800, maxHeight: "85vh", overflow: "auto" }} onClick={e => e.stopPropagation()}>
 
-        <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 16 }}>
-          <h2 style={{ fontSize: 20, fontWeight: 700, fontFamily: "var(--mono)" }}>
-            {fmtD(date)}{" "}
-            <span style={{ fontSize: 14, color: dayR >= 0 ? "var(--green)" : "var(--red)" }}>
-              {real.length ? fmt$(Math.round(dayR * RV)) : ""}
+        {/* Header with navigation */}
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+          <div style={prevDate ? navBtn : navBtnDisabled} onClick={() => prevDate && goTo(prevDate)}>
+            <span>◀</span>
+            {prevDate && <span style={{ fontSize: 10, color: "var(--text3)" }}>{fmtD(prevDate)}</span>}
+          </div>
+          <div style={{ textAlign: "center" }}>
+            <h2 style={{ fontSize: 20, fontWeight: 700, fontFamily: "var(--mono)" }}>
+              {fmtD(date)}{" "}
+              <span style={{ fontSize: 11, color: "var(--text3)", fontWeight: 400 }}>{getDN(date)}</span>
+            </h2>
+            <span style={{ fontSize: 14, color: dayR >= 0 ? "var(--green)" : "var(--red)", fontFamily: "var(--mono)", fontWeight: 700 }}>
+              {real.length ? `${dayR >= 0 ? "+" : ""}${dayR}R  ${fmt$(Math.round(dayR * RV))}` : ""}
             </span>
-          </h2>
-          <button className="btn bo bx" onClick={onClose}>✕</button>
+          </div>
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <div style={nextDate ? navBtn : navBtnDisabled} onClick={() => nextDate && goTo(nextDate)}>
+              {nextDate && <span style={{ fontSize: 10, color: "var(--text3)" }}>{fmtD(nextDate)}</span>}
+              <span>▶</span>
+            </div>
+            <button className="btn bo bx" onClick={onClose}>✕</button>
+          </div>
         </div>
 
         {sinop.length > 0 && (
@@ -787,6 +823,11 @@ function DayModal({ date, trades, onClose, onViewSS }) {
         )}
 
         {!dt.length && <div className="em">Sin actividad</div>}
+
+        {/* Navigation hint */}
+        <div style={{ textAlign: "center", marginTop: 16, fontSize: 10, color: "var(--text3)" }}>
+          ← → Flechas del teclado para navegar
+        </div>
       </div>
     </div>
   )
@@ -2474,9 +2515,9 @@ function MainApp({ user, onLogout }) {
       {/* Share card modal */}
       {showCard && <ShareCardModal stats={stats} modeLabel={modeLabel} instagram={user.instagram || ""} fd1={fd1} fd2={fd2} onClose={() => setShowCard(false)} />}
       {/* Day detail modal */}
-      {dayModal && <DayModal date={dayModal} trades={trades} onClose={() => setDayModal(null)} onViewSS={setViewSS} />}
+      {dayModal && <DayModal date={dayModal} trades={trades} onClose={() => setDayModal(null)} onViewSS={setViewSS} onNavigate={setDayModal} />}
       {/* Team day detail modal */}
-      {tDayModal && <DayModal date={tDayModal} trades={teamTrades} onClose={() => setTDayModal(null)} onViewSS={setViewSS} />}
+      {tDayModal && <DayModal date={tDayModal} trades={teamTrades} onClose={() => setTDayModal(null)} onViewSS={setViewSS} onNavigate={setTDayModal} />}
       {/* Mobile overlay */}
       {sb && window.innerWidth <= 900 && <div className="overlay" onClick={() => setSb(false)} />}
 
@@ -3567,7 +3608,7 @@ function PublicView({ linkId }) {
   return (
     <div style={{ minHeight: "100vh", background: "var(--bg)", padding: "40px 20px" }}>
       {viewSS && <div className="ss-modal" onClick={() => setViewSS(null)}><img src={viewSS} /></div>}
-      {dayModal && <DayModal date={dayModal} trades={trades} onClose={() => setDayModal(null)} onViewSS={setViewSS} />}
+      {dayModal && <DayModal date={dayModal} trades={trades} onClose={() => setDayModal(null)} onViewSS={setViewSS} onNavigate={setDayModal} />}
       <div style={{ maxWidth: 900, margin: "0 auto" }}>
         {/* Header */}
         <div style={{ marginBottom: 24 }}>
