@@ -1874,6 +1874,8 @@ function MainApp({ user, onLogout }) {
   const [showCard, setShowCard] = useState(false)
   const [showLinkModal, setShowLinkModal] = useState(false)
   const [publicLink, setPublicLink] = useState("")
+  const [selectMode, setSelectMode] = useState(false)
+  const [selectedTradeIds, setSelectedTradeIds] = useState(new Set())
   const fileRef = useRef()
 
   // Team state
@@ -2118,6 +2120,30 @@ function MainApp({ user, onLogout }) {
   }
 
   const del = async id => { if (!confirm("Eliminar?")) return; await supa(`trades?id=eq.${id}`, { method: "DELETE" }); await loadTrades() }
+  const toggleSelectTrade = (id) => {
+    setSelectedTradeIds(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id); else next.add(id)
+      return next
+    })
+  }
+  const selectAllFiltered = () => {
+    setSelectedTradeIds(new Set(filtered.map(t => t.id)))
+  }
+  const deleteSelected = async () => {
+    if (selectedTradeIds.size === 0) return
+    if (!confirm(`⚠️ Borrar ${selectedTradeIds.size} trades seleccionados?\n\nEsta acción no se puede deshacer.`)) return
+    setSaving(true)
+    try {
+      for (const id of selectedTradeIds) {
+        await supa(`trades?id=eq.${id}`, { method: "DELETE" })
+      }
+      setSelectedTradeIds(new Set())
+      setSelectMode(false)
+      await loadTrades()
+    } catch (e) { alert("Error: " + e.message) }
+    finally { setSaving(false) }
+  }
   const edit = t => { setForm({ ...DFT, ...t }); setEditId(t.id); setTab("addTrade") }
   const goTab = t => { setTab(t); if (window.innerWidth <= 900) setSb(false); if (t === "addTrade" && !editId) setForm({ ...DFT }) }
 
@@ -2641,23 +2667,58 @@ function MainApp({ user, onLogout }) {
         <Filters />
         <button className="btn bp bs" onClick={() => goTab("addTrade")}>+</button>
         {appMode === "journal" && <button className="btn bs" style={{ background: "var(--pd)", color: "var(--purple)" }} onClick={() => setShowNT8(true)}>NT8</button>}
+        <button className="btn bs" style={{ background: selectMode ? "var(--rd)" : "var(--surface2)", color: selectMode ? "var(--red)" : "var(--text3)" }}
+          onClick={() => { setSelectMode(!selectMode); setSelectedTradeIds(new Set()) }}>
+          {selectMode ? "Cancelar" : "Seleccionar"}
+        </button>
       </div>
     </div>
+
+    {/* Selection bar */}
+    {selectMode && (
+      <div style={{ display: "flex", gap: 8, alignItems: "center", padding: "8px 14px", background: "var(--rd)", borderRadius: 8, marginBottom: 12, flexWrap: "wrap" }}>
+        <span style={{ fontFamily: "var(--mono)", fontSize: 12, color: "var(--red)", fontWeight: 700 }}>{selectedTradeIds.size} seleccionados</span>
+        <button className="btn bx" style={{ background: "rgba(255,71,87,.2)", color: "var(--red)", fontSize: 10 }} onClick={selectAllFiltered}>Seleccionar todos ({filtered.length})</button>
+        <button className="btn bx" style={{ background: "rgba(255,71,87,.2)", color: "var(--red)", fontSize: 10 }} onClick={() => setSelectedTradeIds(new Set())}>Deseleccionar</button>
+        {selectedTradeIds.size > 0 && (
+          <button className="btn bs" style={{ background: "var(--red)", color: "#fff", marginLeft: "auto" }} onClick={deleteSelected} disabled={saving}>
+            {saving ? "..." : `Borrar ${selectedTradeIds.size} trades`}
+          </button>
+        )}
+      </div>
+    )}
+
     <div className="card" style={{ overflowX: "auto" }}>
       <table className="tbl" style={{ minWidth: 900 }}>
-        <thead><tr>{["Fecha", "Hora", "Setup", "B/S", "R", "P&L", "Res", "Dir", "", ""].map(h => <th key={h}>{h}</th>)}</tr></thead>
+        <thead><tr>
+          {selectMode && <th style={{ width: 30 }}></th>}
+          {["Fecha", "Hora", "Setup", "B/S", "R", "P&L", "Res", "Dir", "", ""].map(h => <th key={h}>{h}</th>)}
+        </tr></thead>
         <tbody>
           {filtered.map(t => {
+            const isChecked = selectedTradeIds.has(t.id)
             if (isSO(t)) return (
-              <tr key={t.id} style={{ opacity: 0.5 }}>
+              <tr key={t.id} style={{ opacity: 0.5, background: isChecked ? "rgba(255,71,87,.08)" : "transparent", cursor: selectMode ? "pointer" : "default" }}
+                onClick={() => selectMode && toggleSelectTrade(t.id)}>
+                {selectMode && <td style={{ textAlign: "center" }}>
+                  <div style={{ width: 16, height: 16, borderRadius: 4, border: isChecked ? "2px solid var(--red)" : "2px solid var(--border2)", background: isChecked ? "var(--red)" : "transparent", display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
+                    {isChecked && <span style={{ color: "#fff", fontSize: 10, fontWeight: 700 }}>✓</span>}
+                  </div>
+                </td>}
                 <td className="mono">{fmtD(t.fecha)}</td>
                 <td colSpan={7} style={{ color: "var(--text3)", fontSize: 11 }}>SIN OP{t.notas ? " — " + t.notas : ""}</td>
-                <td><div style={{ display: "flex", gap: 3 }}><button className="btn bo bx" onClick={() => edit(t)}>E</button><button className="btn bd bx" onClick={() => del(t.id)}>X</button></div></td>
+                {!selectMode && <td><div style={{ display: "flex", gap: 3 }}><button className="btn bo bx" onClick={() => edit(t)}>E</button><button className="btn bd bx" onClick={() => del(t.id)}>X</button></div></td>}
               </tr>
             )
             const r = gR(t)
             return (
-              <tr key={t.id}>
+              <tr key={t.id} style={{ background: isChecked ? "rgba(255,71,87,.08)" : "transparent", cursor: selectMode ? "pointer" : "default" }}
+                onClick={() => selectMode && toggleSelectTrade(t.id)}>
+                {selectMode && <td style={{ textAlign: "center" }}>
+                  <div style={{ width: 16, height: 16, borderRadius: 4, border: isChecked ? "2px solid var(--red)" : "2px solid var(--border2)", background: isChecked ? "var(--red)" : "transparent", display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
+                    {isChecked && <span style={{ color: "#fff", fontSize: 10, fontWeight: 700 }}>✓</span>}
+                  </div>
+                </td>}
                 <td className="mono">{fmtD(t.fecha)}</td>
                 <td className="mono" style={{ fontSize: 10 }}>{t.horaInicio}→{t.horaFinal}</td>
                 <td><STag s={t.setup} /></td>
@@ -2666,8 +2727,8 @@ function MainApp({ user, onLogout }) {
                 <td className="mono bold" style={{ color: r >= 0 ? "var(--green)" : "var(--red)" }}>{fmt$(Math.round(r * RV))}</td>
                 <td><RTag r={t.resultado} /></td>
                 <td><DTag d={t.direccionDia} /></td>
-                <td>{t.screenshot && <span style={{ cursor: "pointer", color: accentColor }} onClick={() => setViewSS(t.screenshot)}>Img</span>}</td>
-                <td><div style={{ display: "flex", gap: 3 }}><button className="btn bo bx" onClick={() => edit(t)}>E</button><button className="btn bd bx" onClick={() => del(t.id)}>X</button></div></td>
+                <td>{t.screenshot && <span style={{ cursor: "pointer", color: accentColor }} onClick={e => { e.stopPropagation(); setViewSS(t.screenshot) }}>Img</span>}</td>
+                {!selectMode && <td><div style={{ display: "flex", gap: 3 }}><button className="btn bo bx" onClick={() => edit(t)}>E</button><button className="btn bd bx" onClick={() => del(t.id)}>X</button></div></td>}
               </tr>
             )
           })}
