@@ -22,7 +22,7 @@ const supa = (path, opts = {}) => fetch(`${SUPA_URL}/rest/v1/${path}`, {
 // CONSTANTS
 // ═══════════════════════════════════════════════
 const SETUPS = ["M1", "M2", "M3", "J1", "J2", "NO"]
-const CTXS = ["APERTURA", "ROMPIMIENTO", "GIRO"]
+const CTXS = ["APERTURA", "ROMPIMIENTO", "GIRO", "PULLBACK"]
 const DIRS = ["RANGO", "ALCISTA", "BAJISTA"]
 const RESS = ["SL", "BE", "WIN", "SIN OP"]
 const SR = SETUPS.filter(s => s !== "NO")
@@ -3155,7 +3155,16 @@ function MainApp({ user, onLogout }) {
     <div className="card">
       <div className="st">Trade</div>
       <div className="form-grid">
-        {F("Setup", "setup", null, SETUPS)}
+        <div className="field">
+          <label>Setup</label>
+          <select className="inp" value={form.setup || ""} onChange={e => {
+            const su = e.target.value
+            const ctxMap = { M1: "APERTURA", M2: "ROMPIMIENTO", M3: "GIRO", J1: "PULLBACK", J2: "PULLBACK" }
+            setForm(f => ({ ...f, setup: su, contexto: ctxMap[su] || f.contexto }))
+          }}>
+            {SETUPS.map(o => <option key={o} value={o}>{o}</option>)}
+          </select>
+        </div>
         {F("Contexto", "contexto", null, CTXS)}
         {F("Buy/Sell", "buySell", null, ["BUY", "SELL"])}
         {F("Puntos SL", "puntosSlStr", "number")}
