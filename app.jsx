@@ -37,7 +37,7 @@ const DFT = {
   breakRangoM30: "NO", direccionDia: "RANGO",
   m5: "", m15: "", m30: "", ddPuntos: "",
   hayNoticia: "NO", noticiaHora: "", noticiaImpacto: "", noticiaTipo: "",
-  screenshot: null, screenshotPreview: null, notas: ""
+  screenshot: null, screenshotPreview: null, notas: "", blockName: ""
 }
 // Trading hours 9:30 AM to 12:00 PM in 5-min intervals
 const HRS = []
@@ -148,7 +148,8 @@ const t2d = (t, uid, mode = "bt") => ({
   noticia_hora: t.noticiaHora || "", noticia_impacto: t.noticiaImpacto || "",
   noticia_tipo: t.noticiaTipo || "", m5: t.m5 || "", m15: t.m15 || "",
   m30: t.m30 || "", screenshot: t.screenshot || "", notas: t.notas || "",
-  account_name: t.accountName || ""
+  account_name: t.accountName || "",
+  block_name: t.blockName || ""
 })
 
 const d2t = d => ({
@@ -164,7 +165,7 @@ const d2t = d => ({
   noticiaImpacto: d.noticia_impacto || "", noticiaTipo: d.noticia_tipo || "",
   m5: d.m5 || "", m15: d.m15 || "", m30: d.m30 || "",
   screenshot: d.screenshot || null, screenshotPreview: d.screenshot || null,
-  notas: d.notas || "", accountName: d.account_name || ""
+  notas: d.notas || "", accountName: d.account_name || "", blockName: d.block_name || ""
 })
 
 // ═══════════════════════════════════════════════
@@ -2004,6 +2005,7 @@ function MainApp({ user, onLogout }) {
   const [adminViewTrades, setAdminViewTrades] = useState([])
   const [adminViewMode, setAdminViewMode] = useState("bt")
   const [inviteCodes, setInviteCodes] = useState([])
+  const [userBlocks, setUserBlocks] = useState([])
 
   // Trades del modo actual
   const trades = useMemo(() => allTrades.filter(t => (t.mode || "bt") === appMode), [allTrades, appMode])
@@ -2018,7 +2020,17 @@ function MainApp({ user, onLogout }) {
     finally { setLoading(false) }
   }, [user.id])
 
+  // Load user's blocks for journal form
+  const loadUserBlocks = useCallback(async () => {
+    try {
+      const res = await supa(`am_blocks?user_id=eq.${user.id}&select=*&order=created_at.asc`)
+      const data = await res.json()
+      if (Array.isArray(data)) setUserBlocks(data)
+    } catch (e) { console.error(e) }
+  }, [user.id])
+
   useEffect(() => { loadTrades() }, [loadTrades])
+  useEffect(() => { loadUserBlocks() }, [loadUserBlocks])
   useEffect(() => {
     const fn = () => setSb(window.innerWidth > 900)
     window.addEventListener("resize", fn)
@@ -3148,6 +3160,16 @@ function MainApp({ user, onLogout }) {
         <TP label="Hora final" value={form.horaFinal} onChange={setHF} />
         <div className="field"><label>Dur</label><div className="af">{autoDur ? autoDur + "m" : "-"}</div></div>
         {F("ATR", "atr", "number")}
+        {appMode === "journal" && userBlocks.length > 0 && (
+          <div className="field">
+            <label>Bloque</label>
+            <select className="inp" value={form.blockName || ""} onChange={e => setForm(f => ({ ...f, blockName: e.target.value }))}
+              style={{ borderColor: form.blockName ? (userBlocks.find(b => b.name === form.blockName) || {}).color || "var(--border2)" : "var(--border2)", color: form.blockName ? (userBlocks.find(b => b.name === form.blockName) || {}).color || "var(--text)" : "var(--text)" }}>
+              <option value="">Sin bloque</option>
+              {userBlocks.map(b => <option key={b.id} value={b.name}>{b.name}</option>)}
+            </select>
+          </div>
+        )}
       </div>
     </div>
 
