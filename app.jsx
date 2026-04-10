@@ -1965,6 +1965,7 @@ function MainApp({ user, onLogout }) {
   const [fd1, setFd1] = useState("")
   const [fd2, setFd2] = useState("")
   const [fAcct, setFAcct] = useState("all")  // account filter
+  const [fDir, setFDir] = useState("all")   // direction filter
   const [viewSS, setViewSS] = useState(null)
   const [sb, setSb] = useState(window.innerWidth > 900)
   const [calMonth, setCM] = useState(new Date().getMonth())
@@ -2391,6 +2392,71 @@ function MainApp({ user, onLogout }) {
       if (worstM.totalR < 0) lines.push(`🔴 Peor mes: ${worstM.key} (${worstM.totalR}R)`)
     }
 
+    else if (type === "direccion") {
+      title = "🧭 Análisis por Dirección del Día"
+      const dirData = DIRS.map(d => {
+        const dirTrades = rT(filtered).filter(t => t.direccionDia === d)
+        if (!dirTrades.length) return null
+        const ds = cS(dirTrades)
+        const dirBE = beAnalysis(dirTrades)
+        return { dir: d, ...ds, beMissed: dirBE && dirBE.withData > 0 ? dirBE.totalMissed : 0, beCount: dirBE ? dirBE.total : 0 }
+      }).filter(Boolean)
+
+      if (!dirData.length) { lines.push("No hay data de dirección."); setAnalyzerResult({ title, lines }); return }
+
+      lines.push("Dirección   Trades  Win%    R Total  PF      BEs   R en mesa")
+      lines.push("─".repeat(62))
+      dirData.forEach(d => {
+        const emoji = d.dir === "ALCISTA" ? "🟢" : d.dir === "BAJISTA" ? "🔴" : "🟡"
+        lines.push(`${emoji} ${d.dir.padEnd(11)}${String(d.total).padEnd(8)}${(d.winRate.toFixed(1) + "%").padEnd(8)}${((d.totalR >= 0 ? "+" : "") + d.totalR + "R").padEnd(10)}${fmtPF(d.profitFactor).padEnd(8)}${String(d.beCount).padEnd(6)}${d.beMissed ? "+" + d.beMissed + "R" : "-"}`)
+      })
+      lines.push("")
+
+      // Best direction
+      const bestDir = dirData.reduce((a, x) => x.totalR > a.totalR ? x : a, dirData[0])
+      const worstDir = dirData.reduce((a, x) => x.totalR < a.totalR ? x : a, dirData[0])
+      lines.push(`✅ Mejor dirección: ${bestDir.dir} (${bestDir.winRate.toFixed(1)}%WR, +${bestDir.totalR}R, PF:${fmtPF(bestDir.profitFactor)})`)
+      if (worstDir.totalR < 0) lines.push(`🔴 Peor dirección: ${worstDir.dir} (${worstDir.winRate.toFixed(1)}%WR, ${worstDir.totalR}R)`)
+      lines.push("")
+
+      // Setup breakdown per direction
+      dirData.forEach(d => {
+        const dirTrades2 = rT(filtered).filter(t => t.direccionDia === d.dir)
+        const setupBreak = SR.map(su => {
+          const st = cS(dirTrades2.filter(t => t.setup === su))
+          return st.total > 0 ? { su, ...st } : null
+        }).filter(Boolean)
+        if (setupBreak.length) {
+          lines.push(`${d.dir} por Setup:`)
+          setupBreak.forEach(sb2 => {
+            lines.push(`  ${sb2.su}: ${sb2.total}t, ${sb2.winRate.toFixed(0)}%WR, ${sb2.totalR >= 0 ? "+" : ""}${sb2.totalR}R`)
+          })
+          lines.push("")
+        }
+      })
+
+      // Context analysis per direction
+      dirData.forEach(d => {
+        const dirTrades3 = rT(filtered).filter(t => t.direccionDia === d.dir)
+        const ctxBreak = CTXS.map(c => {
+          const ct = cS(dirTrades3.filter(t => t.contexto === c))
+          return ct.total > 0 ? { ctx: c, ...ct } : null
+        }).filter(Boolean)
+        if (ctxBreak.length) {
+          lines.push(`${d.dir} por Contexto:`)
+          ctxBreak.forEach(c => {
+            lines.push(`  ${c.ctx}: ${c.total}t, ${c.winRate.toFixed(0)}%WR, ${c.totalR >= 0 ? "+" : ""}${c.totalR}R`)
+          })
+          lines.push("")
+        }
+      })
+
+      // Insight
+      if (bestDir.total >= 5 && worstDir.totalR < 0 && worstDir.total >= 5) {
+        lines.push(`💡 En días ${bestDir.dir} rindes ${Math.abs(bestDir.totalR - worstDir.totalR)}R más que en días ${worstDir.dir}. Considera ajustar tu tamaño en días ${worstDir.dir}.`)
+      }
+    }
+
     setAnalyzerResult({ title, lines })
   }
   const edit = t => { setForm({ ...DFT, ...t }); setEditId(t.id); setTab("addTrade") }
@@ -2559,6 +2625,7 @@ function MainApp({ user, onLogout }) {
   const filtered = useMemo(() => {
     let ft = [...trades]
     if (fAcct !== "all") ft = ft.filter(t => t.accountName === fAcct)
+    if (fDir !== "all") ft = ft.filter(t => t.direccionDia === fDir)
     if (fS !== "all") ft = ft.filter(t => t.setup === fS)
     if (fd1) ft = ft.filter(t => t.fecha >= fd1)
     if (fd2) ft = ft.filter(t => t.fecha <= fd2)
@@ -2572,7 +2639,7 @@ function MainApp({ user, onLogout }) {
     // N trades filter — applied last so it gets the N most recent
     if (fN && parseInt(fN) > 0) ft = ft.slice(0, parseInt(fN))
     return ft
-  }, [trades, fP, fS, fN, fd1, fd2, fAcct])
+  }, [trades, fP, fS, fN, fd1, fd2, fAcct, fDir])
 
   const stats = useMemo(() => cS(filtered), [filtered])
   const extra = useMemo(() => extraS(filtered), [filtered])
@@ -2645,6 +2712,10 @@ function MainApp({ user, onLogout }) {
         <option value="all">All</option>
         {SR.map(s => <option key={s} value={s}>{s}</option>)}
       </select>
+      <select className="inp" style={{ width: "auto", fontSize: 11, padding: "6px 8px", borderColor: fDir !== "all" ? (fDir === "ALCISTA" ? "var(--green)" : fDir === "BAJISTA" ? "var(--red)" : "var(--yellow)") : "var(--border2)", color: fDir !== "all" ? (fDir === "ALCISTA" ? "var(--green)" : fDir === "BAJISTA" ? "var(--red)" : "var(--yellow)") : "var(--text)" }} value={fDir} onChange={e => setFDir(e.target.value)}>
+        <option value="all">Dirección</option>
+        {DIRS.map(d => <option key={d} value={d}>{d}</option>)}
+      </select>
       <div className="pb">
         {["all", "week", "month", "year"].map(p => (
           <button key={p} className={`pbtn ${fP === p ? "active" : ""}`} onClick={() => setFP(p)}>
@@ -2658,7 +2729,7 @@ function MainApp({ user, onLogout }) {
         <label style={{ fontSize: 8 }}>N trades</label>
         <input className="inp" type="number" min="1" style={{ width: 60, fontSize: 11, padding: "6px 4px" }} value={fN} onChange={e => setFN(e.target.value)} placeholder="Ult" />
       </div>
-      {(fd1 || fd2 || fS !== "all" || fP !== "all" || fN || fAcct !== "all") && <button className="btn bo bx" style={{ fontSize: 10 }} onClick={() => { setFd1(""); setFd2(""); setFS("all"); setFP("all"); setFN(""); setFAcct("all"); setCM(new Date().getMonth()); setCY(new Date().getFullYear()) }}>Reset</button>}
+      {(fd1 || fd2 || fS !== "all" || fP !== "all" || fN || fAcct !== "all" || fDir !== "all") && <button className="btn bo bx" style={{ fontSize: 10 }} onClick={() => { setFd1(""); setFd2(""); setFS("all"); setFP("all"); setFN(""); setFAcct("all"); setFDir("all"); setCM(new Date().getMonth()); setCY(new Date().getFullYear()) }}>Reset</button>}
     </div>
   )
 
@@ -3819,7 +3890,8 @@ function MainApp({ user, onLogout }) {
               { id: "hora", label: "🕐 Horas", color: "var(--green)" },
               { id: "setups", label: "◆ Setups", color: "var(--purple)" },
               { id: "tendencia", label: "📈 Tendencia", color: "var(--accent)" },
-              { id: "mensual", label: "📅 Mensual", color: "var(--green)" }
+              { id: "mensual", label: "📅 Mensual", color: "var(--green)" },
+              { id: "direccion", label: "🧭 Dirección", color: "var(--yellow)" }
             ].map(b => (
               <button key={b.id} onClick={() => runAnalysis(b.id)}
                 style={{ padding: "5px 10px", background: b.color + "15", color: b.color, border: `1px solid ${b.color}30`, borderRadius: 6, fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "var(--mono)" }}>
