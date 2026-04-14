@@ -26,7 +26,7 @@ const CTXS = ["APERTURA", "ROMPIMIENTO", "GIRO", "PULLBACK"]
 const DIRS = ["RANGO", "ALCISTA", "BAJISTA"]
 const RESS = ["SL", "BE", "WIN", "SIN OP"]
 const SR = SETUPS.filter(s => s !== "NO")
-const RV = 300
+let RV = 300
 const NHS = ["", "08:30", "09:45", "10:00", "10:30"]
 const NIS = ["", "ALTO", "MEDIO", "BAJO"]
 const NTS = ["", "NFP", "CPI", "PPI", "FOMC", "JOBLESS CLAIMS", "GDP", "RETAIL SALES", "ISM", "PCE", "OTRA"]
@@ -2007,6 +2007,17 @@ function MainApp({ user, onLogout }) {
   const [inviteCodes, setInviteCodes] = useState([])
   const [userBlocks, setUserBlocks] = useState([])
 
+  // User config
+  const [userConfig, setUserConfig] = useState({ r_value: 300, setups: "M1,M2,M3,J1,J2,NO", contexts: "APERTURA,ROMPIMIENTO,GIRO,PULLBACK", show_orb: true, show_news: true, show_direction: true, show_atr: true })
+  const [configLoaded, setConfigLoaded] = useState(false)
+  const userSetups = useMemo(() => userConfig.setups.split(",").map(s => s.trim()).filter(Boolean), [userConfig.setups])
+  const userContexts = useMemo(() => userConfig.contexts.split(",").map(s => s.trim()).filter(Boolean), [userConfig.contexts])
+  const userSR = useMemo(() => userSetups.filter(s => s !== "NO"), [userSetups])
+  const userRV = userConfig.r_value || 300
+
+  // Keep global RV in sync for stats functions
+  useEffect(() => { RV = userRV }, [userRV])
+
   // Trades del modo actual
   const trades = useMemo(() => allTrades.filter(t => (t.mode || "bt") === appMode), [allTrades, appMode])
 
@@ -2029,8 +2040,36 @@ function MainApp({ user, onLogout }) {
     } catch (e) { console.error(e) }
   }, [user.id])
 
+  const loadUserConfig = useCallback(async () => {
+    try {
+      const res = await supa(`user_config?user_id=eq.${user.id}&select=*`)
+      const data = await res.json()
+      if (Array.isArray(data) && data.length > 0) {
+        setUserConfig(data[0])
+      } else {
+        // Create default config for this user
+        await supa("user_config", { method: "POST", body: JSON.stringify({ user_id: user.id }) })
+        const res2 = await supa(`user_config?user_id=eq.${user.id}&select=*`)
+        const data2 = await res2.json()
+        if (Array.isArray(data2) && data2.length > 0) setUserConfig(data2[0])
+      }
+      setConfigLoaded(true)
+    } catch (e) { console.error("config load error", e); setConfigLoaded(true) }
+  }, [user.id])
+
+  const saveUserConfig = async (updates) => {
+    setSaving(true)
+    try {
+      const newConfig = { ...userConfig, ...updates }
+      await supa(`user_config?user_id=eq.${user.id}`, { method: "PATCH", body: JSON.stringify(updates) })
+      setUserConfig(newConfig)
+    } catch (e) { alert("Error guardando config: " + e.message) }
+    finally { setSaving(false) }
+  }
+
   useEffect(() => { loadTrades() }, [loadTrades])
   useEffect(() => { loadUserBlocks() }, [loadUserBlocks])
+  useEffect(() => { loadUserConfig() }, [loadUserConfig])
   useEffect(() => {
     const fn = () => setSb(window.innerWidth > 900)
     window.addEventListener("resize", fn)
@@ -2341,13 +2380,13 @@ function MainApp({ user, onLogout }) {
       title = "◆ Comparación de Setups"
       lines.push("Setup  Trades  Win%    R Total  PF      Exp")
       lines.push("─".repeat(52))
-      SR.forEach(su => {
+      userSR.forEach(su => {
         const ss = cS(trades.filter(t => t.setup === su))
         if (ss.total === 0) return
         lines.push(`${su.padEnd(7)}${String(ss.total).padEnd(8)}${(ss.winRate.toFixed(1) + "%").padEnd(8)}${((ss.totalR >= 0 ? "+" : "") + ss.totalR + "R").padEnd(10)}${fmtPF(ss.profitFactor).padEnd(8)}${ss.expectancy}R`)
       })
       lines.push("")
-      const allSetups = SR.map(su => ({ su, ...cS(trades.filter(t => t.setup === su)) })).filter(x => x.total >= 3)
+      const allSetups = userSR.map(su => ({ su, ...cS(trades.filter(t => t.setup === su)) })).filter(x => x.total >= 3)
       if (allSetups.length) {
         const bestS = allSetups.reduce((a, x) => x.expectancy > a.expectancy ? x : a, allSetups[0])
         const worstS = allSetups.reduce((a, x) => x.expectancy < a.expectancy ? x : a, allSetups[0])
@@ -2434,7 +2473,7 @@ function MainApp({ user, onLogout }) {
       // Setup breakdown per direction
       dirData.forEach(d => {
         const dirTrades2 = rT(filtered).filter(t => t.direccionDia === d.dir)
-        const setupBreak = SR.map(su => {
+        const setupBreak = userSR.map(su => {
           const st = cS(dirTrades2.filter(t => t.setup === su))
           return st.total > 0 ? { su, ...st } : null
         }).filter(Boolean)
@@ -2658,7 +2697,7 @@ function MainApp({ user, onLogout }) {
   const daily = useMemo(() => grpBy(trades, t => t.fecha), [trades])
   const monthly = useMemo(() => grpBy(trades, t => getMo(t.fecha)), [trades])
   const yearly = useMemo(() => grpBy(trades, t => t.fecha ? `20${getYr(t.fecha)}` : ""), [trades])
-  const setupStats = useMemo(() => { const m = {}; SR.forEach(s => m[s] = cS(trades.filter(t => t.setup === s))); return m }, [trades])
+  const setupStats = useMemo(() => { const m = {}; userSR.forEach(s => m[s] = cS(trades.filter(t => t.setup === s))); return m }, [trades, userSR])
   const rTaken = useMemo(() => rDist(filtered, "rResultado"), [filtered])
   const rMax = useMemo(() => rDist(filtered, "rMaximo"), [filtered])
   const hStats = useMemo(() => hourAnalysis(filtered), [filtered])
@@ -2685,6 +2724,7 @@ function MainApp({ user, onLogout }) {
     { id: "avanzado", l: "Avanzado", i: "◉" },
     { id: "tips", l: "Tips", i: "★" },
     ...(appMode === "journal" ? [{ id: "acctmgr", l: "Cuentas", i: "📊" }] : []),
+    { id: "config", l: "Config", i: "⚙" },
     { id: "team", l: "Team", i: "♦" },
     ...(isAdmin ? [{ id: "admin", l: "Admin", i: "⚙" }] : [])
   ]
@@ -2722,7 +2762,7 @@ function MainApp({ user, onLogout }) {
       )}
       <select className="inp" style={{ width: "auto" }} value={fS} onChange={e => setFS(e.target.value)}>
         <option value="all">All</option>
-        {SR.map(s => <option key={s} value={s}>{s}</option>)}
+        {userSR.map(s => <option key={s} value={s}>{s}</option>)}
       </select>
       <select className="inp" style={{ width: "auto", fontSize: 11, padding: "6px 8px", borderColor: fDir !== "all" ? (fDir === "ALCISTA" ? "var(--green)" : fDir === "BAJISTA" ? "var(--red)" : "var(--yellow)") : "var(--border2)", color: fDir !== "all" ? (fDir === "ALCISTA" ? "var(--green)" : fDir === "BAJISTA" ? "var(--red)" : "var(--yellow)") : "var(--text)" }} value={fDir} onChange={e => setFDir(e.target.value)}>
         <option value="all">Dirección</option>
@@ -2919,7 +2959,7 @@ function MainApp({ user, onLogout }) {
     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 16, flexWrap: "wrap", gap: 10 }}>
       <div>
         <h1 className="pt">Dashboard <span style={{ fontSize: 16, fontFamily: "var(--mono)", color: accentColor, fontWeight: 600 }}>{modeLabel}</span></h1>
-        <p className="ps">{stats.total} trades{stats.total !== rT(trades).length ? ` de ${rT(trades).length}` : ""} | 1R={fmt$(RV)}</p>
+        <p className="ps">{stats.total} trades{stats.total !== rT(trades).length ? ` de ${rT(trades).length}` : ""} | 1R={fmt$(userRV)}</p>
       </div>
       <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "flex-start" }}>
         <Filters />
@@ -3159,7 +3199,7 @@ function MainApp({ user, onLogout }) {
         <TP label="Hora inicio" value={form.horaInicio} onChange={setHI} />
         <TP label="Hora final" value={form.horaFinal} onChange={setHF} />
         <div className="field"><label>Dur</label><div className="af">{autoDur ? autoDur + "m" : "-"}</div></div>
-        {F("ATR", "atr", "number")}
+        {userConfig.show_atr && F("ATR", "atr", "number")}
         {appMode === "journal" && userBlocks.length > 0 && (
           <div className="field">
             <label>Bloque</label>
@@ -3184,10 +3224,10 @@ function MainApp({ user, onLogout }) {
             const ctxMap = { M1: "APERTURA", M2: "ROMPIMIENTO", M3: "GIRO", J1: "PULLBACK", J2: "PULLBACK" }
             setForm(f => ({ ...f, setup: su, contexto: ctxMap[su] || f.contexto }))
           }}>
-            {SETUPS.map(o => <option key={o} value={o}>{o}</option>)}
+            {userSetups.map(o => <option key={o} value={o}>{o}</option>)}
           </select>
         </div>
-        {F("Contexto", "contexto", null, CTXS)}
+        {F("Contexto", "contexto", null, userContexts)}
         {F("Buy/Sell", "buySell", null, ["BUY", "SELL"])}
         {F("Puntos SL", "puntosSlStr", "number")}
         {F("DD pts", "ddPuntos", "number")}
@@ -3205,8 +3245,8 @@ function MainApp({ user, onLogout }) {
         {F("Resultado", "resultado", null, RESS)}
         {(isWin || (appMode === "journal" && form.resultado === "SL")) && F("R", "rResultado", "number")}
         {(isWin || form.resultado === "BE") && F("Rmax", "rMaximo", "number")}
-        {F("Break M30", "breakRangoM30", null, ["NO", "SI"])}
-        {F("Dir", "direccionDia", null, DIRS)}
+        {userConfig.show_direction && F("Break M30", "breakRangoM30", null, ["NO", "SI"])}
+        {userConfig.show_direction && F("Dir", "direccionDia", null, DIRS)}
       </div>
       {form.resultado === "SL" && <p style={{ marginTop: 8, fontSize: 12, color: "var(--red)", fontFamily: "var(--mono)" }}>{appMode === "bt" ? "SL=-1R" : `SL=${pn(form.rResultado) ? form.rResultado + "R" : "-1R"}`}</p>}
       {form.resultado === "BE" && <p style={{ marginTop: 8, fontSize: 12, color: "var(--yellow)", fontFamily: "var(--mono)" }}>BE=0R</p>}
@@ -3215,6 +3255,7 @@ function MainApp({ user, onLogout }) {
     </div>
 
     {/* Noticias */}
+    {userConfig.show_news && (
     <div className="card">
       <div className="st">Noticias</div>
       <div className="form-grid">
@@ -3224,8 +3265,10 @@ function MainApp({ user, onLogout }) {
         {form.hayNoticia === "SI" && F("Tipo", "noticiaTipo", null, NTS)}
       </div>
     </div>
+    )}
 
     {/* ORB */}
+    {userConfig.show_orb && (
     <div className="card">
       <div className="st">ORB</div>
       <div className="form-grid" style={{ gridTemplateColumns: "repeat(3,1fr)" }}>
@@ -3234,6 +3277,7 @@ function MainApp({ user, onLogout }) {
         {F("M30", "m30", "number")}
       </div>
     </div>
+    )}
 
     {/* Screenshot & Notas */}
     <div className="card">
@@ -3280,7 +3324,7 @@ function MainApp({ user, onLogout }) {
   <>
     <h1 className="pt" style={{ marginBottom: 14 }}>Setups</h1>
     <div className="g2" style={{ marginBottom: 14 }}>
-      {SR.map(su => {
+      {userSR.map(su => {
         const s2 = setupStats[su]
         return (
           <div key={su} className={`card sc ${s2.totalR > 0 ? "profit" : s2.total ? "loss" : ""}`}>
@@ -3300,7 +3344,7 @@ function MainApp({ user, onLogout }) {
         )
       })}
     </div>
-    <div className="card"><div className="st">Win% por setup</div><BC data={SR.map(s => setupStats[s].winRate)} labels={SR} height={120} unit="%" /></div>
+    <div className="card"><div className="st">Win% por setup</div><BC data={userSR.map(s => setupStats[s].winRate)} labels={userSR} height={120} unit="%" /></div>
   </>
 )}
 
@@ -3493,6 +3537,110 @@ function MainApp({ user, onLogout }) {
   </>
 )}
 
+{/* ═══ TAB: CONFIG ═══ */}
+{tab === "config" && (
+  <>
+    <h1 className="pt" style={{ marginBottom: 16 }}>Configuración</h1>
+
+    {/* Valor de R */}
+    <div className="card">
+      <div className="st">Valor de 1R (dólares)</div>
+      <p style={{ fontSize: 12, color: "var(--text2)", marginBottom: 10 }}>Este valor se usa para calcular P&L en dólares en todo el dashboard.</p>
+      <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+        <span style={{ fontFamily: "var(--mono)", fontSize: 14, color: "var(--text3)" }}>$</span>
+        <input className="inp" type="number" value={userConfig.r_value || ""} onChange={e => setUserConfig(c => ({ ...c, r_value: parseFloat(e.target.value) || 0 }))}
+          style={{ width: 120, fontSize: 16, fontWeight: 700, fontFamily: "var(--mono)" }} />
+        <button className="btn bp bs" onClick={() => saveUserConfig({ r_value: userConfig.r_value })} disabled={saving}>Guardar</button>
+        <span style={{ fontSize: 11, color: "var(--text3)" }}>Actual: {fmt$(userRV)}</span>
+      </div>
+    </div>
+
+    {/* Setups personalizados */}
+    <div className="card">
+      <div className="st">Setups</div>
+      <p style={{ fontSize: 12, color: "var(--text2)", marginBottom: 10 }}>Define los nombres de tus setups. Separa con comas. Agrega "NO" al final para la opción SIN OP.</p>
+      <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+        <input className="inp" value={userConfig.setups || ""} onChange={e => setUserConfig(c => ({ ...c, setups: e.target.value }))}
+          style={{ flex: 1, minWidth: 200, fontSize: 13, fontFamily: "var(--mono)" }} placeholder="M1,M2,M3,J1,J2,NO" />
+        <button className="btn bp bs" onClick={() => saveUserConfig({ setups: userConfig.setups })} disabled={saving}>Guardar</button>
+      </div>
+      <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginTop: 10 }}>
+        {userSetups.map(s => (
+          <span key={s} className={`tag ${s === "NO" ? "tgr" : "ta"}`}>{s}</span>
+        ))}
+      </div>
+    </div>
+
+    {/* Contextos personalizados */}
+    <div className="card">
+      <div className="st">Contextos</div>
+      <p style={{ fontSize: 12, color: "var(--text2)", marginBottom: 10 }}>Define los contextos de operación. Separa con comas.</p>
+      <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+        <input className="inp" value={userConfig.contexts || ""} onChange={e => setUserConfig(c => ({ ...c, contexts: e.target.value }))}
+          style={{ flex: 1, minWidth: 200, fontSize: 13, fontFamily: "var(--mono)" }} placeholder="APERTURA,ROMPIMIENTO,GIRO,PULLBACK" />
+        <button className="btn bp bs" onClick={() => saveUserConfig({ contexts: userConfig.contexts })} disabled={saving}>Guardar</button>
+      </div>
+      <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginTop: 10 }}>
+        {userContexts.map(c => (
+          <span key={c} className="tag tp">{c}</span>
+        ))}
+      </div>
+    </div>
+
+    {/* Mapeo Setup → Contexto automático */}
+    <div className="card">
+      <div className="st">Auto-fill Setup → Contexto</div>
+      <p style={{ fontSize: 12, color: "var(--text2)", marginBottom: 10 }}>Cuando seleccionas un setup, el contexto se llena automáticamente. Personaliza el mapeo aquí:</p>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 8 }}>
+        {userSR.map(su => (
+          <div key={su} style={{ display: "flex", alignItems: "center", gap: 6, background: "var(--bg)", padding: "6px 10px", borderRadius: 8 }}>
+            <span style={{ fontFamily: "var(--mono)", fontWeight: 700, fontSize: 12, color: "var(--accent)", minWidth: 30 }}>{su}</span>
+            <span style={{ color: "var(--text3)", fontSize: 11 }}>→</span>
+            <span style={{ fontFamily: "var(--mono)", fontSize: 11, color: "var(--purple)" }}>
+              {{ M1: "APERTURA", M2: "ROMPIMIENTO", M3: "GIRO", J1: "PULLBACK", J2: "PULLBACK" }[su] || "—"}
+            </span>
+          </div>
+        ))}
+      </div>
+      <p style={{ fontSize: 10, color: "var(--text3)", marginTop: 8 }}>El mapeo se puede cambiar en el código. El contexto siempre es editable manualmente al registrar un trade.</p>
+    </div>
+
+    {/* Campos opcionales */}
+    <div className="card">
+      <div className="st">Campos opcionales del formulario</div>
+      <p style={{ fontSize: 12, color: "var(--text2)", marginBottom: 14 }}>Activa o desactiva secciones del formulario de nuevo trade.</p>
+      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        {[
+          { key: "show_orb", label: "ORB (M5, M15, M30)", desc: "Opening Range Breakout" },
+          { key: "show_news", label: "Noticias", desc: "Hora, impacto y tipo de noticia" },
+          { key: "show_direction", label: "Dirección del día", desc: "Alcista / Bajista / Rango" },
+          { key: "show_atr", label: "ATR", desc: "Average True Range" }
+        ].map(opt => (
+          <div key={opt.key} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 14px", background: "var(--bg)", borderRadius: 8 }}>
+            <div>
+              <div style={{ fontWeight: 600, fontSize: 13 }}>{opt.label}</div>
+              <div style={{ fontSize: 11, color: "var(--text3)" }}>{opt.desc}</div>
+            </div>
+            <div onClick={() => saveUserConfig({ [opt.key]: !userConfig[opt.key] })}
+              style={{ width: 44, height: 24, borderRadius: 12, background: userConfig[opt.key] ? "var(--green)" : "var(--border2)", cursor: "pointer", position: "relative", transition: "background .2s" }}>
+              <div style={{ width: 18, height: 18, borderRadius: "50%", background: "#fff", position: "absolute", top: 3, left: userConfig[opt.key] ? 23 : 3, transition: "left .2s" }} />
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+
+    {/* Reset */}
+    <div className="card" style={{ borderColor: "var(--rd)" }}>
+      <div className="st" style={{ color: "var(--red)" }}>Restaurar valores por defecto</div>
+      <button className="btn bd bs" onClick={async () => {
+        if (!confirm("¿Restaurar toda la configuración a los valores por defecto?")) return
+        await saveUserConfig({ r_value: 300, setups: "M1,M2,M3,J1,J2,NO", contexts: "APERTURA,ROMPIMIENTO,GIRO,PULLBACK", show_orb: true, show_news: true, show_direction: true, show_atr: true })
+      }}>Restaurar defaults</button>
+    </div>
+  </>
+)}
+
 {/* ═══ TAB: TEAM ═══ */}
 {tab === "team" && (
   <>
@@ -3579,7 +3727,7 @@ function MainApp({ user, onLogout }) {
         const ex = extraS(ts)
         const tName = (allUsers.find(u => u.id === teamUser) || { username: "?" }).username
         const tDaily = grpBy(ts, t => t.fecha)
-        const tSetupStats = {}; SR.forEach(su => tSetupStats[su] = cS(ts.filter(t => t.setup === su)))
+        const tSetupStats = {}; userSR.forEach(su => tSetupStats[su] = cS(ts.filter(t => t.setup === su)))
         const tHour = hourAnalysis(ts)
 
         return (
@@ -3686,7 +3834,7 @@ function MainApp({ user, onLogout }) {
             <div className="card" style={{ background: "var(--bg)" }}>
               <div className="st">Setups</div>
               <div className="g2">
-                {SR.map(su => {
+                {userSR.map(su => {
                   const ss = tSetupStats[su]
                   if (!ss.total) return null
                   return (
