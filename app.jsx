@@ -3404,7 +3404,7 @@ function MainApp({ user, onLogout }) {
     <h1 className="pt" style={{ marginBottom: 14 }}>Setups</h1>
     <div className="g2" style={{ marginBottom: 14 }}>
       {userSR.map(su => {
-        const s2 = setupStats[su]
+        const s2 = setupStats[su] || { total: 0, wins: 0, losses: 0, bes: 0, winRate: 0, totalR: 0, profitFactor: 0 }
         return (
           <div key={su} className={`card sc ${s2.totalR > 0 ? "profit" : s2.total ? "loss" : ""}`}>
             <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 12 }}>
@@ -3423,7 +3423,7 @@ function MainApp({ user, onLogout }) {
         )
       })}
     </div>
-    <div className="card"><div className="st">Win% por setup</div><BC data={userSR.map(s => setupStats[s].winRate)} labels={userSR} height={120} unit="%" /></div>
+    <div className="card"><div className="st">Win% por setup</div><BC data={userSR.map(s => (setupStats[s] || {}).winRate || 0)} labels={userSR} height={120} unit="%" /></div>
   </>
 )}
 
@@ -3914,7 +3914,7 @@ function MainApp({ user, onLogout }) {
               <div className="st">Setups</div>
               <div className="g2">
                 {userSR.map(su => {
-                  const ss = tSetupStats[su]
+                  const ss = tSetupStats[su] || { total: 0 }
                   if (!ss.total) return null
                   return (
                     <div key={su} style={{ background: "var(--surface)", borderRadius: 8, padding: 12, borderLeft: `3px solid ${ss.totalR > 0 ? "var(--green)" : "var(--red)"}` }}>
