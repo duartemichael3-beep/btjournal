@@ -7,13 +7,14 @@ import { useState, useMemo, useEffect, useRef, useCallback } from "react"
 // ═══════════════════════════════════════════════
 const SUPA_URL = "https://kkcsykncinisnknymonz.supabase.co"
 const SUPA_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtrY3N5a25jaW5pc25rbnltb256Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzUyNjYxMzIsImV4cCI6MjA5MDg0MjEzMn0.m8M_nIg6h87ocMedXSOSzOr0Xv0iIwjMWuODTnbHmSI"
-const supa = (path, opts = {}) => fetch(`${SUPA_URL}/rest/v1/${path}`, {
+const supa = (path, opts = {}) => fetch(`${SUPA_URL}/rest/v1/${path}${!opts.method || opts.method === "GET" ? (path.includes("?") ? "&" : "?") + "_t=" + Date.now() : ""}`, {
   ...opts,
   headers: {
     "apikey": SUPA_KEY,
     "Authorization": `Bearer ${SUPA_KEY}`,
     "Content-Type": "application/json",
     "Prefer": opts.prefer || "return=representation",
+    "Cache-Control": "no-cache",
     ...(opts.headers || {})
   }
 })
@@ -2956,10 +2957,11 @@ function MainApp({ user, onLogout }) {
 {/* ═══ TAB: DASHBOARD + CALENDAR ═══ */}
 {tab === "dashboard" && (
   <>
-    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 16, flexWrap: "wrap", gap: 10 }}>
+    {/* Header */}
+    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", marginBottom: 20, flexWrap: "wrap", gap: 10 }}>
       <div>
-        <h1 className="pt">Dashboard <span style={{ fontSize: 16, fontFamily: "var(--mono)", color: accentColor, fontWeight: 600 }}>{modeLabel}</span></h1>
-        <p className="ps">{stats.total} trades{stats.total !== rT(trades).length ? ` de ${rT(trades).length}` : ""} | 1R={fmt$(userRV)}</p>
+        <div style={{ fontSize: 10, fontFamily: "var(--mono)", color: "var(--text3)", letterSpacing: 2, textTransform: "uppercase", marginBottom: 4 }}>Dashboard</div>
+        <h1 style={{ fontSize: 30, fontWeight: 700, letterSpacing: -1 }}>{modeLabel} <span style={{ color: accentColor, fontSize: 14, fontFamily: "var(--mono)" }}>{stats.total} trades</span></h1>
       </div>
       <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "flex-start" }}>
         <Filters />
@@ -2974,16 +2976,108 @@ function MainApp({ user, onLogout }) {
       </div>
     </div>
 
-    {/* Metrics */}
-    <div className="metrics">
-      <MC label="P&L" value={`${stats.totalR >= 0 ? "+" : ""}${stats.totalR}R`} sub={fmt$(stats.totalDollar)} color={stats.totalR >= 0 ? "var(--green)" : "var(--red)"} big />
-      <MC label="Win%" value={`${stats.winRate.toFixed(2)}%`} color={stats.winRate >= 50 ? "var(--green)" : "var(--red)"} sub={`${stats.wins}W|${stats.losses}L|${stats.bes}BE`} />
-      <MC label="PF" value={fmtPF(stats.profitFactor)} color={stats.profitFactor >= 1.5 ? "var(--green)" : stats.profitFactor >= 1 ? "var(--yellow)" : "var(--red)"} />
-      <MC label="Exp" value={`${stats.expectancy}R`} color={stats.expectancy > 0 ? "var(--green)" : "var(--red)"} sub={fmt$(stats.expectDollar) + "/t"} />
-      <MC label="Sharpe" value={stats.sharpeRatio.toFixed(2)} color={stats.sharpeRatio >= 1 ? "var(--green)" : stats.sharpeRatio >= 0.5 ? "var(--yellow)" : "var(--red)"} />
-      <MC label="Recovery" value={stats.recoveryFactor === Infinity ? "∞" : stats.recoveryFactor.toFixed(2)} color={stats.recoveryFactor >= 2 ? "var(--green)" : "var(--yellow)"} sub={`DD:${stats.maxEquityDD || 0}R`} />
-      <MC label="Payoff" value={stats.payoffRatio === Infinity ? "∞" : stats.payoffRatio.toFixed(2)} color={stats.payoffRatio >= 2 ? "var(--green)" : "var(--yellow)"} />
-      <MC label="Trades" value={stats.total} sub={stats.sampleValid ? "OK" : "<30"} />
+    {/* Hero P&L Card */}
+    <div className="card" style={{ padding: "24px 28px", marginBottom: 14, background: stats.totalR >= 0 ? "linear-gradient(135deg, rgba(0,214,143,.06) 0%, rgba(18,23,31,.8) 100%)" : "linear-gradient(135deg, rgba(255,71,87,.06) 0%, rgba(18,23,31,.8) 100%)", borderColor: stats.totalR >= 0 ? "rgba(0,214,143,.15)" : "rgba(255,71,87,.15)" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 16 }}>
+        <div>
+          <div style={{ fontSize: 9, fontFamily: "var(--mono)", color: "var(--text3)", letterSpacing: 1.5, marginBottom: 6 }}>PROFIT & LOSS</div>
+          <div style={{ fontSize: 44, fontWeight: 700, fontFamily: "var(--mono)", color: stats.totalR >= 0 ? "var(--green)" : "var(--red)", letterSpacing: -2, lineHeight: 1 }}>{stats.totalR >= 0 ? "+" : ""}{stats.totalR}R</div>
+          <div style={{ fontSize: 16, fontFamily: "var(--mono)", color: stats.totalR >= 0 ? "rgba(0,214,143,.6)" : "rgba(255,71,87,.6)", marginTop: 4 }}>{fmt$(stats.totalDollar)}</div>
+        </div>
+        <div style={{ display: "flex", gap: 20, alignItems: "center" }}>
+          {/* Win Rate Donut */}
+          <div style={{ textAlign: "center" }}>
+            <svg viewBox="0 0 80 80" style={{ width: 76 }}>
+              <circle cx={40} cy={40} r={32} fill="none" stroke="rgba(255,255,255,.06)" strokeWidth={6} />
+              <circle cx={40} cy={40} r={32} fill="none" stroke={stats.winRate >= 50 ? "var(--green)" : "var(--red)"} strokeWidth={6}
+                strokeDasharray={`${stats.winRate * 2.01} ${100 * 2.01}`} strokeLinecap="round" transform="rotate(-90 40 40)" />
+              <text x={40} y={36} textAnchor="middle" fill="var(--text)" fontSize={15} fontWeight={700} fontFamily="var(--mono)">{stats.winRate.toFixed(1)}</text>
+              <text x={40} y={50} textAnchor="middle" fill="var(--text3)" fontSize={8} fontFamily="var(--mono)">WIN%</text>
+            </svg>
+          </div>
+          {/* Streak */}
+          <div style={{ textAlign: "center" }}>
+            <div style={{ fontSize: 32, fontWeight: 700, fontFamily: "var(--mono)", color: stats.curWinStreak > 0 ? "var(--green)" : stats.curLossStreak > 0 ? "var(--red)" : "var(--text3)" }}>
+              {stats.curWinStreak > 0 ? stats.curWinStreak : stats.curLossStreak > 0 ? stats.curLossStreak : 0}
+            </div>
+            <div style={{ fontSize: 8, color: "var(--text3)", fontFamily: "var(--mono)", letterSpacing: 1 }}>
+              {stats.curWinStreak > 0 ? "RACHA WIN" : stats.curLossStreak > 0 ? "RACHA LOSS" : "RACHA"}
+            </div>
+          </div>
+          {/* 1R value */}
+          <div style={{ textAlign: "center", padding: "6px 12px", background: "rgba(76,154,255,.08)", borderRadius: 8, border: "1px solid rgba(76,154,255,.15)" }}>
+            <div style={{ fontSize: 8, color: "var(--text3)", fontFamily: "var(--mono)", letterSpacing: 1 }}>1R</div>
+            <div style={{ fontSize: 16, fontWeight: 700, fontFamily: "var(--mono)", color: "var(--accent)" }}>{fmt$(userRV)}</div>
+          </div>
+        </div>
+      </div>
+      {/* Win/Loss/BE bar */}
+      <div style={{ marginTop: 16, display: "flex", gap: 2, height: 8, borderRadius: 4, overflow: "hidden" }}>
+        {stats.total > 0 && <>
+          <div style={{ width: `${stats.wins / stats.total * 100}%`, background: "var(--green)", borderRadius: "4px 0 0 4px" }} />
+          <div style={{ width: `${stats.losses / stats.total * 100}%`, background: "var(--red)" }} />
+          <div style={{ width: `${stats.bes / stats.total * 100}%`, background: "var(--yellow)", borderRadius: "0 4px 4px 0" }} />
+        </>}
+      </div>
+      <div style={{ display: "flex", justifyContent: "space-between", marginTop: 6, fontSize: 10, fontFamily: "var(--mono)", color: "var(--text3)" }}>
+        <span><span style={{ color: "var(--green)" }}>{stats.wins}W</span> ({stats.total ? Math.round(stats.wins / stats.total * 100) : 0}%)</span>
+        <span><span style={{ color: "var(--red)" }}>{stats.losses}L</span> ({stats.total ? Math.round(stats.losses / stats.total * 100) : 0}%)</span>
+        <span><span style={{ color: "var(--yellow)" }}>{stats.bes}BE</span> ({stats.total ? Math.round(stats.bes / stats.total * 100) : 0}%)</span>
+      </div>
+    </div>
+
+    {/* Metrics Grid */}
+    <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 10, marginBottom: 14 }}>
+      {[
+        { l: "PROFIT FACTOR", v: fmtPF(stats.profitFactor), c: stats.profitFactor >= 1.5 ? "var(--green)" : stats.profitFactor >= 1 ? "var(--yellow)" : "var(--red)" },
+        { l: "EXPECTANCY", v: `${stats.expectancy}R`, s: fmt$(stats.expectDollar) + "/t", c: stats.expectancy > 0 ? "var(--green)" : "var(--red)" },
+        { l: "SHARPE", v: stats.sharpeRatio.toFixed(2), c: stats.sharpeRatio >= 1 ? "var(--green)" : stats.sharpeRatio >= 0.5 ? "var(--yellow)" : "var(--red)" },
+        { l: "RECOVERY", v: stats.recoveryFactor === Infinity ? "∞" : stats.recoveryFactor.toFixed(2), s: `DD: ${stats.maxEquityDD || 0}R`, c: stats.recoveryFactor >= 2 ? "var(--green)" : "var(--yellow)" }
+      ].map((m, i) => (
+        <div key={i} className="card" style={{ padding: "14px 16px", marginBottom: 0 }}>
+          <div style={{ fontSize: 9, fontFamily: "var(--mono)", color: "var(--text3)", letterSpacing: 1.2, marginBottom: 6 }}>{m.l}</div>
+          <div style={{ fontSize: 22, fontWeight: 700, fontFamily: "var(--mono)", color: m.c, letterSpacing: -0.5 }}>{m.v}</div>
+          {m.s && <div style={{ fontSize: 10, color: "var(--text3)", fontFamily: "var(--mono)", marginTop: 2 }}>{m.s}</div>}
+        </div>
+      ))}
+    </div>
+
+    {/* Equity + Radar */}
+    <div style={{ display: "grid", gridTemplateColumns: "1.5fr 1fr", gap: 14, marginBottom: 14 }}>
+      <div className="card" style={{ marginBottom: 0 }}>
+        <div style={{ fontSize: 9, fontFamily: "var(--mono)", color: "var(--text3)", letterSpacing: 1.2, marginBottom: 10 }}>EQUITY CURVE</div>
+        <EC trades={filtered} />
+      </div>
+      <div className="card" style={{ marginBottom: 0 }}>
+        <div style={{ fontSize: 9, fontFamily: "var(--mono)", color: "var(--text3)", letterSpacing: 1.2, marginBottom: 10 }}>PERFIL DE TRADING</div>
+        {(() => {
+          const radarM = [
+            { label: "WR%", value: stats.winRate, max: 100 },
+            { label: "PF", value: Math.min(stats.profitFactor === Infinity ? 4 : stats.profitFactor, 4), max: 4 },
+            { label: "Sharpe", value: Math.min(Math.max(stats.sharpeRatio, 0), 3), max: 3 },
+            { label: "Recov", value: Math.min(stats.recoveryFactor === Infinity ? 6 : stats.recoveryFactor, 6), max: 6 },
+            { label: "Payoff", value: Math.min(stats.payoffRatio === Infinity ? 4 : stats.payoffRatio, 4), max: 4 },
+          ]
+          const cx2 = 100, cy2 = 100, rd = 65, n = radarM.length
+          const angleStep = (Math.PI * 2) / n
+          const gp = (i, val, max) => {
+            const angle = angleStep * i - Math.PI / 2
+            const ratio = Math.min(val / max, 1)
+            return { x: cx2 + Math.cos(angle) * rd * ratio, y: cy2 + Math.sin(angle) * rd * ratio }
+          }
+          return (
+            <svg viewBox="0 0 200 200" style={{ width: "100%", maxWidth: 200, display: "block", margin: "0 auto" }}>
+              {[0.25, 0.5, 0.75, 1].map(level => (
+                <polygon key={level} points={radarM.map((_, i) => { const p = gp(i, level * radarM[i].max, radarM[i].max); return `${p.x},${p.y}` }).join(" ")} fill="none" stroke="rgba(255,255,255,.06)" strokeWidth={0.5} />
+              ))}
+              {radarM.map((_, i) => { const p = gp(i, radarM[i].max, radarM[i].max); return <line key={i} x1={cx2} y1={cy2} x2={p.x} y2={p.y} stroke="rgba(255,255,255,.06)" strokeWidth={0.5} /> })}
+              <polygon points={radarM.map((m, i) => { const p = gp(i, m.value, m.max); return `${p.x},${p.y}` }).join(" ")} fill="rgba(0,214,143,.12)" stroke="var(--green)" strokeWidth={1.5} />
+              {radarM.map((m, i) => { const p = gp(i, m.value, m.max); return <circle key={i} cx={p.x} cy={p.y} r={2.5} fill="var(--green)" /> })}
+              {radarM.map((m, i) => { const p = gp(i, radarM[i].max * 1.25, radarM[i].max); return <text key={i} x={p.x} y={p.y} textAnchor="middle" dominantBaseline="middle" fill="var(--text3)" fontSize={7} fontFamily="var(--mono)">{m.label}</text> })}
+            </svg>
+          )
+        })()}
+      </div>
     </div>
 
     {/* Resumen */}
@@ -2995,25 +3089,10 @@ function MainApp({ user, onLogout }) {
         <div className="info-item"><div className="ml">Ops/dia</div><div className="val">{extra.avgOps}</div></div>
         <div className="info-item"><div className="ml">Mejor dia sem</div><div className="val" style={{ color: "var(--green)" }}>{extra.bestWd}</div></div>
         <div className="info-item"><div className="ml">Peor dia sem</div><div className="val" style={{ color: "var(--red)" }}>{extra.worstWd}</div></div>
-        <div className="info-item"><div className="ml">Racha WIN</div><div className="val" style={{ color: "var(--green)" }}>{stats.maxWinStreak}{stats.curWinStreak > 1 ? ` (now:${stats.curWinStreak})` : ""}</div></div>
-        <div className="info-item"><div className="ml">Racha LOSS</div><div className="val" style={{ color: "var(--red)" }}>{stats.maxLossStreak}{stats.curLossStreak > 1 ? ` (now:${stats.curLossStreak})` : ""}</div></div>
+        <div className="info-item"><div className="ml">Racha WIN max</div><div className="val" style={{ color: "var(--green)" }}>{stats.maxWinStreak}</div></div>
+        <div className="info-item"><div className="ml">Racha LOSS max</div><div className="val" style={{ color: "var(--red)" }}>{stats.maxLossStreak}</div></div>
         <div className="info-item"><div className="ml">Dur WIN/SL/BE</div><div className="val">{stats.avgDurWin}/{stats.avgDurSL}/{stats.avgDurBE}min</div></div>
-      </div>
-    </div>
-
-    {/* Equity + Resultados */}
-    <div className="g2" style={{ marginBottom: 14 }}>
-      <div className="card"><div className="st">Equity</div><EC trades={filtered} /></div>
-      <div className="card">
-        <div className="st">Resultados</div>
-        <div style={{ display: "flex", gap: 20, flexWrap: "wrap" }}>
-          {[["WIN", stats.wins, "var(--green)"], ["SL", stats.losses, "var(--red)"], ["BE", stats.bes, "var(--yellow)"]].map(([l, v, c]) => (
-            <div key={l} style={{ textAlign: "center" }}>
-              <div style={{ fontSize: 24, fontWeight: 700, fontFamily: "var(--mono)", color: c }}>{stats.total ? Math.round(v / stats.total * 10000) / 100 : 0}%</div>
-              <div style={{ fontSize: 10, color: "var(--text3)" }}>{l}({v})</div>
-            </div>
-          ))}
-        </div>
+        <div className="info-item"><div className="ml">Payoff Ratio</div><div className="val" style={{ color: stats.payoffRatio >= 2 ? "var(--green)" : "var(--yellow)" }}>{stats.payoffRatio === Infinity ? "∞" : stats.payoffRatio.toFixed(2)}</div></div>
       </div>
     </div>
 
@@ -3023,32 +3102,35 @@ function MainApp({ user, onLogout }) {
       <BC data={daily.slice(0, 20).reverse().map(d => d.totalR)} labels={daily.slice(0, 20).reverse().map(d => fmtD(d.key))} unit="R" />
     </div>
 
-    {/* ── CALENDAR (same page) ── */}
+    {/* ── CALENDAR ── */}
     <div className="card" style={{ padding: 0, overflow: "hidden" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "14px 18px", borderBottom: "1px solid var(--border)" }}>
         <span style={{ fontFamily: "var(--mono)", fontWeight: 700, fontSize: 15, textTransform: "capitalize" }}>{monthName}</span>
-        <div style={{ display: "flex", gap: 6 }}>
-          <button className="btn bo bx" onClick={() => { if (calMonth === 0) { setCM(11); setCY(calYear - 1) } else setCM(calMonth - 1) }}>&lt;</button>
-          <button className="btn bo bx" onClick={() => { if (calMonth === 11) { setCM(0); setCY(calYear + 1) } else setCM(calMonth + 1) }}>&gt;</button>
+        <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+          <span style={{ fontSize: 12, fontFamily: "var(--mono)", color: monthR >= 0 ? "var(--green)" : "var(--red)", fontWeight: 700 }}>{monthR >= 0 ? "+" : ""}{fmt$(Math.round(monthR * RV))}</span>
+          <div style={{ display: "flex", gap: 4 }}>
+            <button className="btn bo bx" onClick={() => { if (calMonth === 0) { setCM(11); setCY(calYear - 1) } else setCM(calMonth - 1) }}>&lt;</button>
+            <button className="btn bo bx" onClick={() => { if (calMonth === 11) { setCM(0); setCY(calYear + 1) } else setCM(calMonth + 1) }}>&gt;</button>
+          </div>
         </div>
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(8,1fr)", fontSize: 10, fontFamily: "var(--mono)" }}>
         {["Do", "Lu", "Ma", "Mi", "Ju", "Vi", "Sa", "Sem"].map(d => (
-          <div key={d} style={{ padding: "8px 3px", textAlign: "center", color: "var(--text3)", borderBottom: "1px solid var(--border)", fontWeight: 600 }}>{d}</div>
+          <div key={d} style={{ padding: "8px 3px", textAlign: "center", color: "var(--text3)", borderBottom: "1px solid rgba(255,255,255,.04)", fontWeight: 600 }}>{d}</div>
         ))}
         {calWeeks.map((wk, wi) => (
           <React.Fragment key={wi}>
             {wk.map((d, di) => {
-              if (!d) return <div key={di} style={{ padding: 10, borderBottom: "1px solid var(--border)", background: "var(--bg)" }} />
+              if (!d) return <div key={di} style={{ padding: 10, borderBottom: "1px solid rgba(255,255,255,.03)", background: "var(--bg)" }} />
               const dayTrades = calByDay[d] || []
               const realTrades = rT(dayTrades)
               const hasSinOp = dayTrades.some(isSO)
               const dayR = Math.round(realTrades.reduce((a, t) => a + gR(t), 0) * 100) / 100
-              const bg = hasSinOp && !realTrades.length ? "rgba(90,100,120,.08)"
-                : realTrades.length ? (dayR > 0 ? "rgba(0,214,143,.08)" : dayR < 0 ? "rgba(255,71,87,.08)" : "var(--surface)")
+              const bg = hasSinOp && !realTrades.length ? "rgba(90,100,120,.05)"
+                : realTrades.length ? (dayR > 0 ? "rgba(0,214,143,.05)" : dayR < 0 ? "rgba(255,71,87,.05)" : "var(--surface)")
                 : "var(--surface)"
               return (
-                <div key={di} style={{ padding: "6px 4px", borderBottom: "1px solid var(--border)", borderRight: "1px solid var(--border)", background: bg, minHeight: 58, cursor: dayTrades.length ? "pointer" : "default" }}
+                <div key={di} style={{ padding: "6px 4px", borderBottom: "1px solid rgba(255,255,255,.03)", borderRight: "1px solid rgba(255,255,255,.03)", background: bg, minHeight: 58, cursor: dayTrades.length ? "pointer" : "default" }}
                   onClick={() => dayTrades.length && setDayModal(makeDate(d))}>
                   <div style={{ fontSize: 9, color: "var(--text3)", marginBottom: 3 }}>{d}</div>
                   {hasSinOp && !realTrades.length
@@ -3061,12 +3143,10 @@ function MainApp({ user, onLogout }) {
                 </div>
               )
             })}
-            {/* Pad remaining days */}
             {Array(7 - wk.length).fill(null).map((_, i) => (
-              <div key={`p${i}`} style={{ padding: 10, borderBottom: "1px solid var(--border)", background: "var(--bg)" }} />
+              <div key={`p${i}`} style={{ padding: 10, borderBottom: "1px solid rgba(255,255,255,.03)", background: "var(--bg)" }} />
             ))}
-            {/* Week summary */}
-            <div style={{ padding: "6px 4px", borderBottom: "1px solid var(--border)", background: "var(--surface2)", display: "flex", flexDirection: "column", justifyContent: "center", alignItems: "center" }}>
+            <div style={{ padding: "6px 4px", borderBottom: "1px solid rgba(255,255,255,.03)", background: "var(--surface2)", display: "flex", flexDirection: "column", justifyContent: "center", alignItems: "center" }}>
               <div style={{ fontSize: 8, color: "var(--text3)" }}>S{wi + 1}</div>
               <div style={{ fontSize: 12, fontWeight: 700, color: weekSums[wi].r > 0 ? "var(--green)" : weekSums[wi].r < 0 ? "var(--red)" : "var(--text3)", fontFamily: "var(--mono)" }}>
                 {weekSums[wi].c ? fmt$(Math.round(weekSums[wi].r * RV)) : "-"}
@@ -3075,10 +3155,8 @@ function MainApp({ user, onLogout }) {
           </React.Fragment>
         ))}
       </div>
-      {/* Month footer */}
-      <div style={{ display: "flex", justifyContent: "flex-end", gap: 16, padding: "10px 18px", borderTop: "1px solid var(--border)", background: "var(--surface2)" }}>
+      <div style={{ display: "flex", justifyContent: "flex-end", gap: 16, padding: "10px 18px", borderTop: "1px solid rgba(255,255,255,.04)", background: "var(--surface2)" }}>
         <span style={{ fontSize: 11, color: "var(--text3)", fontFamily: "var(--mono)" }}>TRADES: <b style={{ color: "var(--text)" }}>{rT(monthTrades).length}</b></span>
-        <span style={{ fontSize: 11, color: "var(--text3)", fontFamily: "var(--mono)" }}>P&L: <b style={{ color: monthR >= 0 ? "var(--green)" : "var(--red)" }}>{monthR >= 0 ? "+" : ""}{fmt$(Math.round(monthR * RV))}</b></span>
       </div>
     </div>
   </>
