@@ -2023,7 +2023,7 @@ function MainApp({ user, onLogout }) {
   // Load ALL trades
   const loadTrades = useCallback(async () => {
     try {
-      const res = await supa(`trades?user_id=eq.${user.id}&select=*&order=created_at.desc`)
+      const res = await supa(`trades?user_id=eq.${user.id}&select=*`)
       const data = await res.json()
       if (Array.isArray(data)) setAllTrades(data.map(d2t))
     } catch (e) { console.error(e) }
