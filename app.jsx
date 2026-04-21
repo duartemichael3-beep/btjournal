@@ -14,10 +14,8 @@ const supa = (path, opts = {}) => fetch(`${SUPA_URL}/rest/v1/${path}`, {
     "Authorization": `Bearer ${SUPA_KEY}`,
     "Content-Type": "application/json",
     "Prefer": opts.prefer || "return=representation",
-    "Cache-Control": "no-cache, no-store",
     ...(opts.headers || {})
-  },
-  cache: "no-store"
+  }
 })
 
 // ═══════════════════════════════════════════════
@@ -2012,8 +2010,8 @@ function MainApp({ user, onLogout }) {
   // User config
   const [userConfig, setUserConfig] = useState({ r_value: 300, setups: "M1,M2,M3,J1,J2,NO", contexts: "APERTURA,ROMPIMIENTO,GIRO,PULLBACK", show_orb: true, show_news: true, show_direction: true, show_atr: true })
   const [configLoaded, setConfigLoaded] = useState(false)
-  const userSetups = useMemo(() => userConfig.setups.split(",").map(s => s.trim()).filter(Boolean), [userConfig.setups])
-  const userContexts = useMemo(() => userConfig.contexts.split(",").map(s => s.trim()).filter(Boolean), [userConfig.contexts])
+  const userSetups = useMemo(() => (userConfig.setups || "M1,M2,M3,J1,J2,NO").split(",").map(s => s.trim()).filter(Boolean), [userConfig.setups])
+  const userContexts = useMemo(() => (userConfig.contexts || "APERTURA,ROMPIMIENTO,GIRO,PULLBACK").split(",").map(s => s.trim()).filter(Boolean), [userConfig.contexts])
   const userSR = useMemo(() => userSetups.filter(s => s !== "NO"), [userSetups])
   const userRV = userConfig.r_value || 300
 
@@ -3067,7 +3065,7 @@ function MainApp({ user, onLogout }) {
             return { x: cx2 + Math.cos(angle) * rd * ratio, y: cy2 + Math.sin(angle) * rd * ratio }
           }
           return (
-            <svg viewBox="0 0 200 200" style={{ width: "100%", maxWidth: 200, display: "block", margin: "0 auto" }}>
+            <svg viewBox="0 0 200 200" style={{ width: "100%", maxWidth: 320, display: "block", margin: "0 auto" }}>
               {[0.25, 0.5, 0.75, 1].map(level => (
                 <polygon key={level} points={radarM.map((_, i) => { const p = gp(i, level * radarM[i].max, radarM[i].max); return `${p.x},${p.y}` }).join(" ")} fill="none" stroke="rgba(255,255,255,.06)" strokeWidth={0.5} />
               ))}
