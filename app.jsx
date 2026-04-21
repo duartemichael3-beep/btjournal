@@ -7,14 +7,26 @@ import { useState, useMemo, useEffect, useRef, useCallback } from "react"
 // ═══════════════════════════════════════════════
 const SUPA_URL = "https://kkcsykncinisnknymonz.supabase.co"
 const SUPA_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtrY3N5a25jaW5pc25rbnltb256Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzUyNjYxMzIsImV4cCI6MjA5MDg0MjEzMn0.m8M_nIg6h87ocMedXSOSzOr0Xv0iIwjMWuODTnbHmSI"
-const supa = (path, opts = {}) => {
-  const headers = new Headers()
-  headers.set("apikey", SUPA_KEY)
-  headers.set("Authorization", "Bearer " + SUPA_KEY)
-  headers.set("Content-Type", "application/json")
-  headers.set("Prefer", opts.prefer || "return=representation")
-  if (opts.headers) { Object.entries(opts.headers).forEach(([k, v]) => headers.set(k, v)) }
-  return fetch(SUPA_URL + "/rest/v1/" + path, { ...opts, headers })
+const supa = async (path, opts = {}) => {
+  const doFetch = () => {
+    const headers = new Headers()
+    headers.set("apikey", SUPA_KEY)
+    headers.set("Authorization", "Bearer " + SUPA_KEY)
+    headers.set("Content-Type", "application/json")
+    headers.set("Prefer", opts.prefer || "return=representation")
+    if (opts.headers) { Object.entries(opts.headers).forEach(([k, v]) => headers.set(k, v)) }
+    return fetch(SUPA_URL + "/rest/v1/" + path, { ...opts, headers })
+  }
+  let res = await doFetch()
+  if (res.status >= 500 && (!opts.method || opts.method === "GET")) {
+    await new Promise(r => setTimeout(r, 500))
+    res = await doFetch()
+  }
+  if (res.status >= 500 && (!opts.method || opts.method === "GET")) {
+    await new Promise(r => setTimeout(r, 1000))
+    res = await doFetch()
+  }
+  return res
 }
 
 // ═══════════════════════════════════════════════
