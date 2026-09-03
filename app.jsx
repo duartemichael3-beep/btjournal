@@ -538,6 +538,7 @@ function MainApp() {
   const [appMode, setAppMode] = useState("bt")
   const [showCard, setShowCard] = useState(false)
   const [dayModal, setDayModal] = useState(null)
+  const [toast, setToast] = useState("")
   const fileRef = useRef()
 
   const trades = useMemo(() => allTrades.filter(t => (t.mode || "bt") === appMode), [allTrades, appMode])
@@ -559,23 +560,23 @@ function MainApp() {
     const t = { ...form, duracionTrade: String(cDur(form.horaInicio, form.horaFinal) || ""), mode: appMode }
     if (t.resultado === "BE") t.rResultado = "0"
     if (t.resultado === "SL" && !pn(t.rResultado)) t.rResultado = "-1"
-    if (editId) { setAllTrades(prev => prev.map(tr => tr.id === editId ? { ...t, id: editId } : tr)); setEditId(null) }
-    else setAllTrades(prev => [...prev, { ...t, id: genId(), createdAt: new Date().toISOString() }])
-    setForm({ ...DFT, setup: config.setups[0] || "", contexto: config.contextos[0] || "" })
-    setTab("dashboard")
+    if (editId) { setAllTrades(prev => prev.map(tr => tr.id === editId ? { ...t, id: editId } : tr)); setEditId(null); setToast("Trade actualizado ✓"); setTab("trades") }
+    else { setAllTrades(prev => [...prev, { ...t, id: genId(), createdAt: new Date().toISOString() }]); setToast("Trade guardado ✓") }
+    setTimeout(() => setToast(""), 2000)
+    setForm({ ...DFT, fecha: form.fecha, horaInicio: form.horaInicio, horaFinal: form.horaFinal, setup: config.setups[0] || "", contexto: config.contextos[0] || "" })
   }
 
   const saveSinOp = () => {
     if (!form.fecha) return alert("Fecha obligatoria")
     const t = { ...DFT, fecha: form.fecha, isSinOp: true, notas: form.notas || "", mode: appMode, id: genId(), createdAt: new Date().toISOString() }
     setAllTrades(prev => [...prev, t])
-    setForm({ ...DFT, setup: config.setups[0] || "", contexto: config.contextos[0] || "" })
+    setForm({ ...DFT, fecha: form.fecha, setup: config.setups[0] || "", contexto: config.contextos[0] || "" })
     alert("SIN OP registrado")
   }
 
   const del = id => { if (!confirm("Eliminar?")) return; setAllTrades(prev => prev.filter(t => t.id !== id)) }
   const edit = t => { setForm({ ...DFT, ...t }); setEditId(t.id); setTab("addTrade") }
-  const goTab = t => { setTab(t); if (window.innerWidth <= 900) setSb(false); if (t === "addTrade" && !editId) setForm({ ...DFT, setup: config.setups[0] || "", contexto: config.contextos[0] || "" }) }
+  const goTab = t => { setTab(t); if (window.innerWidth <= 900) setSb(false); if (t === "addTrade" && !editId) setForm(f => ({ ...DFT, fecha: f.fecha, horaInicio: f.horaInicio, horaFinal: f.horaFinal, setup: config.setups[0] || "", contexto: config.contextos[0] || "" })) }
 
   const exportCSV = () => {
     const h = ["fecha", "horaInicio", "horaFinal", "duracionTrade", "atr", "setup", "contexto", "buySell", "puntosSlStr", "rResultado", "mfe", "resultado", "direccionDia", "ddPuntos", "notas", "isSinOp"]
@@ -747,6 +748,7 @@ function MainApp() {
   return (
     <>
       {viewSS && <div className="ss-modal" onClick={() => setViewSS(null)}><img src={viewSS} /></div>}
+      {toast && <div style={{ position: "fixed", top: 20, right: 20, background: "var(--gd)", color: "var(--green)", padding: "10px 18px", borderRadius: 8, fontFamily: "var(--mono)", fontSize: 12, fontWeight: 600, zIndex: 10000, border: "1px solid var(--green)" }}>{toast}</div>}
       {showCard && <ShareCardModal trades={filtered} modeLabel={modeLabel} rValue={rValue} instagram={config.instagram} onClose={() => setShowCard(false)} />}
       {dayModal && <DayModal date={dayModal} trades={trades} onClose={() => setDayModal(null)} onViewSS={setViewSS} rValue={rValue} />}
       {sb && typeof window !== "undefined" && window.innerWidth <= 900 && <div className="overlay" onClick={() => setSb(false)} />}
