@@ -41,11 +41,17 @@ const DEFAULT_CONFIG = {
   setups: ["M1", "M2", "M3", "J1", "J2"],
   contextos: ["APERTURA", "ROMPIMIENTO", "GIRO"],
   rValue: 300,
-  instagram: ""
+  instagram: "",
+  rLevels: [1, 2, 3, 4, 5],
+  fields: { atr: true, direccion: true, ddPuntos: true, contratos: false, scaling: false }
 }
 const loadConfig = () => {
-  try { const raw = localStorage.getItem(K_CONFIG); return raw ? { ...DEFAULT_CONFIG, ...JSON.parse(raw) } : { ...DEFAULT_CONFIG } }
-  catch { return { ...DEFAULT_CONFIG } }
+  try {
+    const raw = localStorage.getItem(K_CONFIG)
+    if (!raw) return { ...DEFAULT_CONFIG }
+    const parsed = JSON.parse(raw)
+    return { ...DEFAULT_CONFIG, ...parsed, fields: { ...DEFAULT_CONFIG.fields, ...(parsed.fields || {}) } }
+  } catch { return { ...DEFAULT_CONFIG } }
 }
 const saveConfig = (cfg) => {
   try { localStorage.setItem(K_CONFIG, JSON.stringify(cfg)); return true }
@@ -69,6 +75,7 @@ const DFT = {
   setup: "", contexto: "", buySell: "BUY", puntosSlStr: "",
   rResultado: "", mfe: "", resultado: "SL",
   direccionDia: "RANGO", ddPuntos: "",
+  contratos: "", contratosFavor: "", contratosContra: "",
   screenshot: null, screenshotPreview: null, notas: "",
   isSinOp: false, mode: "bt"
 }
@@ -623,7 +630,7 @@ function MainApp() {
   }
 
   const exportCSV = () => {
-    const h = ["fecha", "horaInicio", "horaFinal", "duracionTrade", "atr", "setup", "contexto", "buySell", "puntosSlStr", "rResultado", "mfe", "resultado", "direccionDia", "ddPuntos", "notas", "isSinOp"]
+    const h = ["fecha", "horaInicio", "horaFinal", "duracionTrade", "atr", "setup", "contexto", "buySell", "puntosSlStr", "rResultado", "mfe", "resultado", "direccionDia", "ddPuntos", "contratos", "contratosFavor", "contratosContra", "notas", "isSinOp"]
     const csv = [h.join(","), ...trades.map(t => h.map(k => `"${t[k] !== undefined ? t[k] : ""}"`).join(","))].join("\n")
     const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" })); a.download = `${appMode}_journal.csv`; a.click()
   }
@@ -783,6 +790,7 @@ function MainApp() {
   const [ctxInput, setCtxInput] = useState(config.contextos.join(", "))
   const [rValueInput, setRValueInput] = useState(String(rValue))
   const [igInput, setIgInput] = useState(config.instagram || "")
+  const [rLevelsInput, setRLevelsInput] = useState(config.rLevels.join(", "))
 
   // ── RENDER en Parte 4 ──
 
@@ -949,7 +957,7 @@ function MainApp() {
       <TP label="Hora inicio" value={form.horaInicio} onChange={setHI} />
       <TP label="Hora final" value={form.horaFinal} onChange={setHF} />
       <div className="field"><label>Dur</label><div className="af">{autoDur ? autoDur + "m" : "-"}</div></div>
-      {F("ATR", "atr", "number")}
+      {config.fields.atr && F("ATR", "atr", "number")}
     </div>
   </div>
   <div className="card"><div className="st">Trade</div>
@@ -958,17 +966,35 @@ function MainApp() {
       {F("Contexto", "contexto", null, config.contextos)}
       {F("Buy/Sell", "buySell", null, ["BUY", "SELL"])}
       {F("Puntos SL", "puntosSlStr", "number")}
-      {F("DD pts", "ddPuntos", "number")}
-      <div className="field"><label>DD%</label><div className="af" style={{ color: ddPct !== null && ddPct > 50 ? "var(--red)" : "var(--purple)" }}>{ddPct !== null ? ddPct + "%" : "-"}</div></div>
+      {config.fields.ddPuntos && F("DD pts", "ddPuntos", "number")}
+      {config.fields.ddPuntos && <div className="field"><label>DD%</label><div className="af" style={{ color: ddPct !== null && ddPct > 50 ? "var(--red)" : "var(--purple)" }}>{ddPct !== null ? ddPct + "%" : "-"}</div></div>}
+      {config.fields.contratos && F("Contratos", "contratos", "number")}
     </div>
+    {config.fields.scaling && <div className="form-grid" style={{ marginTop: 12 }}>
+      {F("Contratos a favor", "contratosFavor", "number")}
+      {F("Contratos en contra", "contratosContra", "number")}
+    </div>}
   </div>
   <div className="card"><div className="st">Resultado</div>
     <div className="form-grid">
       {F("Resultado", "resultado", null, RESS)}
-      {(form.resultado === "WIN" || form.resultado === "SL") && F("R resultado", "rResultado", "number")}
-      {F("MFE (max a favor)", "mfe", "number")}
-      {F("Dir", "direccionDia", null, DIRS)}
+      {config.fields.direccion && F("Dir", "direccionDia", null, DIRS)}
     </div>
+
+    {(form.resultado === "WIN" || form.resultado === "SL") && <div style={{ marginTop: 14 }}>
+      <label style={{ fontSize: 9, color: "var(--text3)", textTransform: "uppercase", letterSpacing: ".8px", fontWeight: 600, fontFamily: "var(--mono)", display: "block", marginBottom: 6 }}>R resultado — rapido o manual</label>
+      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+        {config.rLevels.map(rl => {
+          const val = form.resultado === "SL" ? -rl : rl
+          const active = pn(form.rResultado) === val
+          return <button key={rl} type="button" onClick={() => setForm(f => ({ ...f, rResultado: String(val) }))}
+            className="btn bs" style={{ background: active ? (form.resultado === "SL" ? "var(--rd)" : "var(--gd)") : "var(--surface2)", color: active ? (form.resultado === "SL" ? "var(--red)" : "var(--green)") : "var(--text2)", border: `1px solid ${active ? (form.resultado === "SL" ? "var(--red)" : "var(--green)") : "var(--border2)"}` }}>R{rl}</button>
+        })}
+        <input className="inp" type="number" style={{ width: 90 }} placeholder="manual" value={form.rResultado} onChange={e => setForm(f => ({ ...f, rResultado: e.target.value }))} />
+      </div>
+    </div>}
+
+    <div className="form-grid" style={{ marginTop: 14 }}>{F("MFE (max a favor)", "mfe", "number")}</div>
     <p style={{ marginTop: 8, fontSize: 11, color: "var(--text3)", fontFamily: "var(--mono)" }}>MFE = cuanto R llego a estar a favor el trade en su punto maximo, gane o pierda al final. Util para medir si sales muy pronto.</p>
     {form.resultado === "SL" && <p style={{ marginTop: 4, fontSize: 12, color: "var(--red)", fontFamily: "var(--mono)" }}>{pn(form.rResultado) ? `SL=${form.rResultado}R` : "SL=-1R (default)"}</p>}
     {form.resultado === "BE" && <p style={{ marginTop: 4, fontSize: 12, color: "var(--yellow)", fontFamily: "var(--mono)" }}>BE=0R</p>}
@@ -1104,6 +1130,35 @@ function MainApp() {
       <button className="btn bp bs" onClick={() => { const arr = ctxInput.split(",").map(s => s.trim().toUpperCase()).filter(Boolean); if (arr.length) setConfig(c => ({ ...c, contextos: arr })) }}>Guardar</button>
     </div>
     <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 10 }}>{config.contextos.map(s => <span key={s} className="tag tp">{s}</span>)}</div>
+  </div>
+
+  <div className="card">
+    <div className="st">Campos opcionales del formulario</div>
+    <p style={{ fontSize: 12, color: "var(--text2)", marginBottom: 12 }}>Activa o desactiva que campos aparecen al registrar un trade nuevo.</p>
+    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      {[
+        ["atr", "ATR"],
+        ["direccion", "Direccion del dia"],
+        ["ddPuntos", "Puntos de drawdown (DD)"],
+        ["contratos", "Cantidad de contratos"],
+        ["scaling", "Contratos agregados (a favor / en contra)"]
+      ].map(([key, label]) => (
+        <label key={key} style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer", fontSize: 13 }}>
+          <input type="checkbox" checked={!!config.fields[key]} onChange={e => setConfig(c => ({ ...c, fields: { ...c.fields, [key]: e.target.checked } }))} style={{ width: 16, height: 16, accentColor: "var(--accent)", cursor: "pointer" }} />
+          {label}
+        </label>
+      ))}
+    </div>
+  </div>
+
+  <div className="card">
+    <div className="st">Niveles R rapidos</div>
+    <p style={{ fontSize: 12, color: "var(--text2)", marginBottom: 10 }}>Botones de seleccion rapida para el campo "R resultado" al registrar un trade. Separados por comas.</p>
+    <div style={{ display: "flex", gap: 8 }}>
+      <input className="inp" value={rLevelsInput} onChange={e => setRLevelsInput(e.target.value)} placeholder="1, 2, 3, 4, 5" />
+      <button className="btn bp bs" onClick={() => { const arr = rLevelsInput.split(",").map(s => pn(s.trim())).filter(v => v > 0); if (arr.length) setConfig(c => ({ ...c, rLevels: arr })) }}>Guardar</button>
+    </div>
+    <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 10 }}>{config.rLevels.map(r => <span key={r} className="tag tg">R{r}</span>)}</div>
   </div>
 
   <div className="card">
