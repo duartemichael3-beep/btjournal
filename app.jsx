@@ -585,6 +585,7 @@ function MainApp() {
     if (!form.fecha) return alert("Fecha obligatoria")
     if (!form.isSinOp && !form.setup) return alert("Selecciona un setup")
     const t = { ...form, duracionTrade: String(cDur(form.horaInicio, form.horaFinal) || ""), mode: appMode }
+    if (config.fields.scaling) t.contratosTotal = String(pn(form.contratos) + pn(form.contratosFavor) + pn(form.contratosContra))
     if (t.resultado === "BE") t.rResultado = "0"
     if (t.resultado === "SL" && !pn(t.rResultado)) t.rResultado = "-1"
     if (editId) { setAllTrades(prev => prev.map(tr => tr.id === editId ? { ...t, id: editId } : tr)); setEditId(null); setToast("Trade actualizado ✓"); setTab("trades") }
@@ -630,7 +631,7 @@ function MainApp() {
   }
 
   const exportCSV = () => {
-    const h = ["fecha", "horaInicio", "horaFinal", "duracionTrade", "atr", "setup", "contexto", "buySell", "puntosSlStr", "rResultado", "mfe", "resultado", "direccionDia", "ddPuntos", "contratos", "contratosFavor", "contratosContra", "notas", "isSinOp"]
+    const h = ["fecha", "horaInicio", "horaFinal", "duracionTrade", "atr", "setup", "contexto", "buySell", "puntosSlStr", "rResultado", "mfe", "resultado", "direccionDia", "ddPuntos", "contratos", "contratosFavor", "contratosContra", "contratosTotal", "notas", "isSinOp"]
     const csv = [h.join(","), ...trades.map(t => h.map(k => `"${t[k] !== undefined ? t[k] : ""}"`).join(","))].join("\n")
     const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" })); a.download = `${appMode}_journal.csv`; a.click()
   }
@@ -973,6 +974,7 @@ function MainApp() {
     {config.fields.scaling && <div className="form-grid" style={{ marginTop: 12 }}>
       {F("Contratos a favor", "contratosFavor", "number")}
       {F("Contratos en contra", "contratosContra", "number")}
+      <div className="field"><label>Total contratos</label><div className="af" style={{ color: "var(--accent)", fontWeight: 700 }}>{pn(form.contratos) + pn(form.contratosFavor) + pn(form.contratosContra) || "-"}</div></div>
     </div>}
   </div>
   <div className="card"><div className="st">Resultado</div>
