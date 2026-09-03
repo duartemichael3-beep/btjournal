@@ -7,14 +7,34 @@ import { useState, useMemo, useEffect, useRef, useCallback } from "react"
 // ═══════════════════════════════════════════════
 const K_TRADES = "mjp_trades"
 const K_CONFIG = "mjp_config"
+const K_BACKUP = "mjp_backup"
+
+const loadBackup = () => {
+  try { const raw = localStorage.getItem(K_BACKUP); return raw ? JSON.parse(raw) : null } catch { return null }
+}
 
 const loadTrades = () => {
-  try { const raw = localStorage.getItem(K_TRADES); const d = raw ? JSON.parse(raw) : []; return Array.isArray(d) ? d : [] }
-  catch { return [] }
+  try {
+    const raw = localStorage.getItem(K_TRADES)
+    const d = raw ? JSON.parse(raw) : []
+    if (Array.isArray(d) && d.length) return d
+    // Main key empty/corrupted - try to auto-recover from the safety backup
+    const bk = loadBackup()
+    if (bk && Array.isArray(bk.trades) && bk.trades.length) {
+      localStorage.setItem(K_TRADES, JSON.stringify(bk.trades))
+      return bk.trades
+    }
+    return Array.isArray(d) ? d : []
+  } catch { const bk = loadBackup(); return bk && Array.isArray(bk.trades) ? bk.trades : [] }
 }
 const saveTrades = (trades) => {
-  try { localStorage.setItem(K_TRADES, JSON.stringify(trades)); return true }
-  catch (e) { console.error("Error guardando:", e); return false }
+  try {
+    localStorage.setItem(K_TRADES, JSON.stringify(trades))
+    // Safety net: keep a rolling backup in a separate key. If the main key
+    // ever gets wiped (bad deploy, browser cleanup, etc.) this survives.
+    if (trades.length > 0) localStorage.setItem(K_BACKUP, JSON.stringify({ trades, savedAt: new Date().toISOString() }))
+    return true
+  } catch (e) { console.error("Error guardando:", e); return false }
 }
 
 const DEFAULT_CONFIG = {
@@ -578,6 +598,30 @@ function MainApp() {
   const edit = t => { setForm({ ...DFT, ...t }); setEditId(t.id); setTab("addTrade") }
   const goTab = t => { setTab(t); if (window.innerWidth <= 900) setSb(false); if (t === "addTrade" && !editId) setForm(f => ({ ...DFT, fecha: f.fecha, horaInicio: f.horaInicio, horaFinal: f.horaFinal, setup: config.setups[0] || "", contexto: config.contextos[0] || "" })) }
 
+  const exportBackup = () => {
+    const data = { trades: allTrades, config, exportedAt: new Date().toISOString(), version: 1 }
+    const a = document.createElement("a")
+    a.href = URL.createObjectURL(new Blob([JSON.stringify(data)], { type: "application/json" }))
+    a.download = `myjournalpro_backup_${new Date().toISOString().slice(0, 10)}.json`
+    a.click()
+  }
+
+  const importBackup = (e) => {
+    const f = e.target.files[0]; if (!f) return
+    const reader = new FileReader()
+    reader.onload = ev => {
+      try {
+        const data = JSON.parse(ev.target.result)
+        if (!Array.isArray(data.trades)) { alert("Archivo de backup invalido"); return }
+        if (!confirm(`Este backup tiene ${data.trades.length} trades. ¿Reemplazar TODOS tus datos actuales con este backup?`)) return
+        setAllTrades(data.trades)
+        if (data.config) setConfig(c => ({ ...c, ...data.config }))
+        alert("Backup restaurado: " + data.trades.length + " trades")
+      } catch (err) { alert("Error leyendo el backup: " + err.message) }
+    }
+    reader.readAsText(f)
+  }
+
   const exportCSV = () => {
     const h = ["fecha", "horaInicio", "horaFinal", "duracionTrade", "atr", "setup", "contexto", "buySell", "puntosSlStr", "rResultado", "mfe", "resultado", "direccionDia", "ddPuntos", "notas", "isSinOp"]
     const csv = [h.join(","), ...trades.map(t => h.map(k => `"${t[k] !== undefined ? t[k] : ""}"`).join(","))].join("\n")
@@ -769,6 +813,8 @@ function MainApp() {
         </div>
         <nav className="sb-nav">{nav.map(n => (<button key={n.id} className={`sb-btn ${tab === n.id ? "active" : ""}`} onClick={() => goTab(n.id)}><span style={{ fontFamily: "var(--mono)", fontSize: 14, width: 18, textAlign: "center" }}>{n.i}</span><span>{n.l}</span></button>))}</nav>
         <div className="sb-footer">
+          <button onClick={exportBackup} style={{ color: "var(--accent)", background: "var(--ad)" }}>💾 Backup completo</button>
+          <label style={{ color: "var(--accent)", background: "var(--ad)" }}>📂 Restaurar backup<input type="file" accept=".json" onChange={importBackup} style={{ display: "none" }} /></label>
           <button onClick={exportCSV}>Exportar CSV</button>
           <label>Importar CSV<input type="file" accept=".csv" onChange={importCSV} style={{ display: "none" }} /></label>
           {trades.length > 0 && <button onClick={deleteAll} style={{ color: "var(--red)", background: "var(--rd)", fontSize: 10 }}>Borrar {trades.length} {modeLabel}</button>}
