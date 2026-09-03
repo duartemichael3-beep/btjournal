@@ -16,23 +16,25 @@ const loadBackup = () => {
 const loadTrades = () => {
   try {
     const raw = localStorage.getItem(K_TRADES)
-    const d = raw ? JSON.parse(raw) : []
-    if (Array.isArray(d) && d.length) return d
-    // Main key empty/corrupted - try to auto-recover from the safety backup
-    const bk = loadBackup()
-    if (bk && Array.isArray(bk.trades) && bk.trades.length) {
-      localStorage.setItem(K_TRADES, JSON.stringify(bk.trades))
-      return bk.trades
+    if (raw === null) {
+      // Key never existed at all (first run, or wiped by browser) - try backup
+      const bk = loadBackup()
+      return bk && Array.isArray(bk.trades) ? bk.trades : []
     }
+    const d = JSON.parse(raw)
+    // Trust whatever is stored, INCLUDING a deliberately empty array (user deleted everything)
     return Array.isArray(d) ? d : []
-  } catch { const bk = loadBackup(); return bk && Array.isArray(bk.trades) ? bk.trades : [] }
+  } catch {
+    const bk = loadBackup()
+    return bk && Array.isArray(bk.trades) ? bk.trades : []
+  }
 }
 const saveTrades = (trades) => {
   try {
     localStorage.setItem(K_TRADES, JSON.stringify(trades))
-    // Safety net: keep a rolling backup in a separate key. If the main key
-    // ever gets wiped (bad deploy, browser cleanup, etc.) this survives.
-    if (trades.length > 0) localStorage.setItem(K_BACKUP, JSON.stringify({ trades, savedAt: new Date().toISOString() }))
+    // Safety net: mirror into a second key. Always write it, even when empty,
+    // so a deletion is properly reflected and never gets "undone" on reload.
+    localStorage.setItem(K_BACKUP, JSON.stringify({ trades, savedAt: new Date().toISOString() }))
     return true
   } catch (e) { console.error("Error guardando:", e); return false }
 }
@@ -411,7 +413,7 @@ const BC = ({ data, labels, height = 130, unit = "", colors }) => {
   )
 }
 
-function DayModal({ date, trades, onClose, onViewSS, rValue }) {
+function DayModal({ date, trades, onClose, onViewSS, rValue, onEdit, onDelete }) {
   const dt = trades.filter(t => t.fecha === date)
   const real = rT(dt)
   const sinop = dt.filter(t => t.isSinOp)
@@ -420,15 +422,20 @@ function DayModal({ date, trades, onClose, onViewSS, rValue }) {
 
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.85)", zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }} onClick={onClose}>
-      <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 16, padding: 24, width: "100%", maxWidth: 800, maxHeight: "85vh", overflow: "auto" }} onClick={e => e.stopPropagation()}>
+      <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 16, padding: 24, width: "100%", maxWidth: 850, maxHeight: "85vh", overflow: "auto" }} onClick={e => e.stopPropagation()}>
         <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 16 }}>
           <h2 style={{ fontSize: 20, fontWeight: 700, fontFamily: "var(--mono)" }}>{fmtD(date)} <span style={{ fontSize: 14, color: dayR >= 0 ? "var(--green)" : "var(--red)" }}>{real.length ? fmt$(dayR * rValue) : ""}</span></h2>
           <button className="btn bo bx" onClick={onClose}>✕</button>
         </div>
-        {sinop.length > 0 && <div style={{ marginBottom: 12, padding: "8px 14px", background: "rgba(90,100,120,.1)", borderRadius: 8, borderLeft: "3px solid var(--text3)" }}>
-          <span style={{ fontFamily: "var(--mono)", fontSize: 12, color: "var(--text3)", fontWeight: 600 }}>SIN OP</span>
-          {sinop.map((t, i) => t.notas ? <span key={i} style={{ fontSize: 12, color: "var(--text2)", marginLeft: 8 }}>— {t.notas}</span> : null)}
-        </div>}
+        {sinop.length > 0 && sinop.map(t => (
+          <div key={t.id} style={{ marginBottom: 12, padding: "8px 14px", background: "rgba(90,100,120,.1)", borderRadius: 8, borderLeft: "3px solid var(--text3)", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
+            <div><span style={{ fontFamily: "var(--mono)", fontSize: 12, color: "var(--text3)", fontWeight: 600 }}>SIN OP</span>{t.notas ? <span style={{ fontSize: 12, color: "var(--text2)", marginLeft: 8 }}>— {t.notas}</span> : null}</div>
+            {(onEdit || onDelete) && <div style={{ display: "flex", gap: 4, flexShrink: 0 }}>
+              {onEdit && <button className="btn bo bx" onClick={() => onEdit(t)}>Editar</button>}
+              {onDelete && <button className="btn bd bx" onClick={() => onDelete(t.id)}>Borrar</button>}
+            </div>}
+          </div>
+        ))}
         {real.length > 0 && <>
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 14 }}>
             {[["N", s.total], ["Win%", s.winRate.toFixed(2) + "%", s.winRate >= 50 ? "var(--green)" : "var(--red)"], ["R", fmtR(s.totalR), s.totalR >= 0 ? "var(--green)" : "var(--red)"], ["PF", fmtPF(s.profitFactor)]].map(([l, v, c]) => (
@@ -436,7 +443,7 @@ function DayModal({ date, trades, onClose, onViewSS, rValue }) {
             ))}
           </div>
           <div style={{ overflowX: "auto" }}>
-            <table className="tbl"><thead><tr><th>Hora</th><th>Setup</th><th>B/S</th><th>R</th><th>MFE</th><th>P&L</th><th>Res</th><th></th></tr></thead>
+            <table className="tbl"><thead><tr><th>Hora</th><th>Setup</th><th>B/S</th><th>R</th><th>MFE</th><th>P&L</th><th>Res</th><th></th><th></th></tr></thead>
               <tbody>{real.map(t => { const r = gR(t), mfe = gMFE(t); return (
                 <tr key={t.id}>
                   <td className="mono" style={{ fontSize: 11 }}>{t.horaInicio}→{t.horaFinal}</td>
@@ -446,6 +453,10 @@ function DayModal({ date, trades, onClose, onViewSS, rValue }) {
                   <td className="mono bold" style={{ color: r >= 0 ? "var(--green)" : "var(--red)" }}>{fmt$(r * rValue)}</td>
                   <td><RTag r={t.resultado} /></td>
                   <td>{t.screenshot && <img src={t.screenshot} style={{ maxHeight: 40, borderRadius: 4, cursor: "pointer" }} onClick={() => onViewSS(t.screenshot)} />}</td>
+                  <td>{(onEdit || onDelete) && <div style={{ display: "flex", gap: 3 }}>
+                    {onEdit && <button className="btn bo bx" onClick={() => onEdit(t)}>E</button>}
+                    {onDelete && <button className="btn bd bx" onClick={() => onDelete(t.id)}>X</button>}
+                  </div>}</td>
                 </tr>
               )})}</tbody>
             </table>
@@ -466,6 +477,7 @@ function DayModal({ date, trades, onClose, onViewSS, rValue }) {
       </div>
     </div>
   )
+
 }
 
 function ShareCardModal({ trades, modeLabel, rValue, instagram, onClose }) {
@@ -807,7 +819,7 @@ function MainApp() {
       {viewSS && <div className="ss-modal" onClick={() => setViewSS(null)}><img src={viewSS} /></div>}
       {toast && <div style={{ position: "fixed", top: 20, right: 20, background: "var(--gd)", color: "var(--green)", padding: "10px 18px", borderRadius: 8, fontFamily: "var(--mono)", fontSize: 12, fontWeight: 600, zIndex: 10000, border: "1px solid var(--green)" }}>{toast}</div>}
       {showCard && <ShareCardModal trades={filtered} modeLabel={modeLabel} rValue={rValue} instagram={config.instagram} onClose={() => setShowCard(false)} />}
-      {dayModal && <DayModal date={dayModal} trades={calSourceTrades} onClose={() => setDayModal(null)} onViewSS={setViewSS} rValue={rValue} />}
+      {dayModal && <DayModal date={dayModal} trades={calSourceTrades} onClose={() => setDayModal(null)} onViewSS={setViewSS} rValue={rValue} onEdit={t => { setDayModal(null); edit(t) }} onDelete={id => { del(id); setDayModal(null) }} />}
       {sb && typeof window !== "undefined" && window.innerWidth <= 900 && <div className="overlay" onClick={() => setSb(false)} />}
 
       <div className="mobile-bar">
