@@ -770,11 +770,15 @@ function MainApp() {
     </div>
   )
 
+  // Calendar uses trades filtered by setup only (not date range), so you can
+  // isolate a single backtest model even when multiple models share the same dates.
+  const calSourceTrades = useMemo(() => fS === "all" ? trades : trades.filter(t => t.setup === fS), [trades, fS])
+
   const calByDay = useMemo(() => {
     const bd = {}
-    trades.forEach(t => { if (!t.fecha) return; const d = safeDate(t.fecha); if (d.getMonth() === calMonth && d.getFullYear() === calYear) { const day = d.getDate(); if (!bd[day]) bd[day] = []; bd[day].push(t) } })
+    calSourceTrades.forEach(t => { if (!t.fecha) return; const d = safeDate(t.fecha); if (d.getMonth() === calMonth && d.getFullYear() === calYear) { const day = d.getDate(); if (!bd[day]) bd[day] = []; bd[day].push(t) } })
     return bd
-  }, [trades, calMonth, calYear])
+  }, [calSourceTrades, calMonth, calYear])
 
   const daysInMonth = new Date(calYear, calMonth + 1, 0).getDate()
   const firstDayOfWeek = new Date(calYear, calMonth, 1).getDay()
@@ -782,7 +786,7 @@ function MainApp() {
   const calCells = []; for (let i = 0; i < firstDayOfWeek; i++) calCells.push(null); for (let d = 1; d <= daysInMonth; d++) calCells.push(d)
   const calWeeks = []; for (let i = 0; i < calCells.length; i += 7) calWeeks.push(calCells.slice(i, i + 7))
   const weekSums = calWeeks.map(wk => { let r = 0, c = 0; wk.forEach(d => { if (d && calByDay[d]) rT(calByDay[d]).forEach(t => { r += gR(t); c++ }) }); return { r: Math.round(r * 100) / 100, c } })
-  const monthTrades = trades.filter(t => { if (!t.fecha) return false; const d = safeDate(t.fecha); return d.getMonth() === calMonth && d.getFullYear() === calYear })
+  const monthTrades = calSourceTrades.filter(t => { if (!t.fecha) return false; const d = safeDate(t.fecha); return d.getMonth() === calMonth && d.getFullYear() === calYear })
   const monthR = Math.round(rT(monthTrades).reduce((a, t) => a + gR(t), 0) * 100) / 100
   const makeDate = d => `${calYear}-${String(calMonth + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`
 
@@ -803,7 +807,7 @@ function MainApp() {
       {viewSS && <div className="ss-modal" onClick={() => setViewSS(null)}><img src={viewSS} /></div>}
       {toast && <div style={{ position: "fixed", top: 20, right: 20, background: "var(--gd)", color: "var(--green)", padding: "10px 18px", borderRadius: 8, fontFamily: "var(--mono)", fontSize: 12, fontWeight: 600, zIndex: 10000, border: "1px solid var(--green)" }}>{toast}</div>}
       {showCard && <ShareCardModal trades={filtered} modeLabel={modeLabel} rValue={rValue} instagram={config.instagram} onClose={() => setShowCard(false)} />}
-      {dayModal && <DayModal date={dayModal} trades={trades} onClose={() => setDayModal(null)} onViewSS={setViewSS} rValue={rValue} />}
+      {dayModal && <DayModal date={dayModal} trades={calSourceTrades} onClose={() => setDayModal(null)} onViewSS={setViewSS} rValue={rValue} />}
       {sb && typeof window !== "undefined" && window.innerWidth <= 900 && <div className="overlay" onClick={() => setSb(false)} />}
 
       <div className="mobile-bar">
