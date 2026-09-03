@@ -43,7 +43,7 @@ const DEFAULT_CONFIG = {
   rValue: 300,
   instagram: "",
   rLevels: [1, 2, 3, 4, 5],
-  fields: { atr: true, direccion: true, ddPuntos: true, contratos: false, scaling: false }
+  fields: { atr: true, direccion: true, ddPuntos: true, contratos: false, scaling: false, hora: true }
 }
 const loadConfig = () => {
   try {
@@ -955,9 +955,9 @@ function MainApp() {
   <div className="card"><div className="st">General</div>
     <div className="form-grid">
       <DatePick value={form.fecha} onChange={v => setForm(f => ({ ...f, fecha: v }))} label="Fecha" />
-      <TP label="Hora inicio" value={form.horaInicio} onChange={setHI} />
-      <TP label="Hora final" value={form.horaFinal} onChange={setHF} />
-      <div className="field"><label>Dur</label><div className="af">{autoDur ? autoDur + "m" : "-"}</div></div>
+      {config.fields.hora && <TP label="Hora inicio" value={form.horaInicio} onChange={setHI} />}
+      {config.fields.hora && <TP label="Hora final" value={form.horaFinal} onChange={setHF} />}
+      {config.fields.hora && <div className="field"><label>Dur</label><div className="af">{autoDur ? autoDur + "m" : "-"}</div></div>}
       {config.fields.atr && F("ATR", "atr", "number")}
     </div>
   </div>
@@ -1139,6 +1139,7 @@ function MainApp() {
     <p style={{ fontSize: 12, color: "var(--text2)", marginBottom: 12 }}>Activa o desactiva que campos aparecen al registrar un trade nuevo.</p>
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
       {[
+        ["hora", "Hora inicio / final"],
         ["atr", "ATR"],
         ["direccion", "Direccion del dia"],
         ["ddPuntos", "Puntos de drawdown (DD)"],
