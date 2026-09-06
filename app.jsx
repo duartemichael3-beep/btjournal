@@ -1016,9 +1016,9 @@ function MainApp() {
       <div className="field"><label>Total contratos</label><div className="af" style={{ color: "var(--accent)", fontWeight: 700 }}>{pn(form.contratos) + pn(form.contratosFavor) + pn(form.contratosContra) || "-"}</div></div>
     </div>}
     {config.fields.promediadas && <div className="form-grid" style={{ marginTop: 12 }}>
-      {F("Contratos iniciales", "contratos", "number")}
+      {!config.fields.contratos && F("Contratos iniciales", "contratos", "number")}
       {F("Promediadas (veces)", "promediadas", "number")}
-      <div className="field"><label>Total contratos</label><div className="af" style={{ color: "var(--accent)", fontWeight: 700 }}>{pn(form.contratos) && pn(form.promediadas) ? pn(form.contratos) * pn(form.promediadas) : "-"}</div></div>
+      <div className="field"><label>Total contratos (x{form.promediadas || "?"})</label><div className="af" style={{ color: "var(--accent)", fontWeight: 700 }}>{pn(form.contratos) && pn(form.promediadas) ? pn(form.contratos) * pn(form.promediadas) : "-"}</div></div>
     </div>}
   </div>
   <div className="card"><div className="st">Resultado</div>
