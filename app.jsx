@@ -46,7 +46,7 @@ const DEFAULT_CONFIG = {
   rValue: 300,
   instagram: "",
   rLevels: [1, 2, 3, 4, 5],
-  fields: { atr: true, direccion: true, ddPuntos: true, contratos: false, scaling: false, hora: true, dolares: false }
+  fields: { atr: true, direccion: true, ddPuntos: true, contratos: false, scaling: false, hora: true, dolares: false, setup: true, puntosSL: true, mfe: true, promediadas: false, rRapido: true }
 }
 const loadConfig = () => {
   try {
@@ -607,11 +607,11 @@ function MainApp() {
 
   const save = () => {
     if (!form.fecha) return alert("Fecha obligatoria")
-    if (!form.isSinOp && !form.setup) return alert("Selecciona un setup")
+    if (!form.isSinOp && config.fields.setup && !form.setup) return alert("Selecciona un setup")
     const t = { ...form, duracionTrade: String(cDur(form.horaInicio, form.horaFinal) || ""), mode: appMode }
-    if (form.estrategia === "DCA" && pn(form.contratos) > 0 && pn(form.promediadas) > 0) t.contratosTotal = String(pn(form.contratos) * pn(form.promediadas))
+    if (config.fields.promediadas && pn(form.contratos) > 0 && pn(form.promediadas) > 0) t.contratosTotal = String(pn(form.contratos) * pn(form.promediadas))
     else if (config.fields.scaling) t.contratosTotal = String(pn(form.contratos) + pn(form.contratosFavor) + pn(form.contratosContra))
-    if ((config.fields.dolares || form.estrategia === "DCA") && pn(form.capitalArriesgado) > 0) {
+    if (config.fields.dolares && pn(form.capitalArriesgado) > 0) {
       const resultDollar = t.resultado === "WIN" ? pn(form.tpDolar) : t.resultado === "SL" ? -pn(form.capitalArriesgado) : 0
       t.resultadoDolar = String(resultDollar)
       const riskBase = pn(form.ddDolar) > 0 ? pn(form.ddDolar) : pn(form.capitalArriesgado)
@@ -762,8 +762,7 @@ function MainApp() {
   const tipsData = useMemo(() => genTips(filtered, rValue), [filtered, rValue])
 
   const isWin = form.resultado === "WIN"
-  const isDCA = form.estrategia === "DCA"
-  const showDolarBlock = config.fields.dolares || isDCA
+  const showDolarBlock = config.fields.dolares
   const autoDur = cDur(form.horaInicio, form.horaFinal)
   const ddPct = gDD(form)
   const accentColor = appMode === "journal" ? "var(--purple)" : "var(--accent)"
@@ -994,30 +993,29 @@ function MainApp() {
   <div className="card"><div className="st">General</div>
     <div className="form-grid">
       <DatePick value={form.fecha} onChange={v => setForm(f => ({ ...f, fecha: v }))} label="Fecha" />
-      {!isDCA && config.fields.hora && <TP label="Hora inicio" value={form.horaInicio} onChange={setHI} />}
-      {!isDCA && config.fields.hora && <TP label="Hora final" value={form.horaFinal} onChange={setHF} />}
-      {!isDCA && config.fields.hora && <div className="field"><label>Dur</label><div className="af">{autoDur ? autoDur + "m" : "-"}</div></div>}
-      {!isDCA && config.fields.atr && F("ATR", "atr", "number")}
+      {config.fields.hora && <TP label="Hora inicio" value={form.horaInicio} onChange={setHI} />}
+      {config.fields.hora && <TP label="Hora final" value={form.horaFinal} onChange={setHF} />}
+      {config.fields.hora && <div className="field"><label>Dur</label><div className="af">{autoDur ? autoDur + "m" : "-"}</div></div>}
+      {config.fields.atr && F("ATR", "atr", "number")}
     </div>
   </div>
-  {isDCA && <p style={{ marginTop: -10, marginBottom: 16, fontSize: 11, color: "var(--purple)", fontFamily: "var(--mono)" }}>Modo DCA activo — se ocultaron los campos que no aplican a esta estrategia.</p>}
   <div className="card"><div className="st">Trade</div>
     <div className="form-grid">
-      {!isDCA && F("Setup", "setup", null, config.setups)}
+      {config.fields.setup && F("Setup", "setup", null, config.setups)}
       {F("Estrategia", "estrategia", null, config.estrategias)}
-      {!isDCA && F("Contexto", "contexto", null, config.contextos)}
+      {F("Contexto", "contexto", null, config.contextos)}
       {F("Buy/Sell", "buySell", null, ["BUY", "SELL"])}
-      {!isDCA && F("Puntos SL", "puntosSlStr", "number")}
-      {!isDCA && config.fields.ddPuntos && F("DD pts", "ddPuntos", "number")}
-      {!isDCA && config.fields.ddPuntos && <div className="field"><label>DD%</label><div className="af" style={{ color: ddPct !== null && ddPct > 50 ? "var(--red)" : "var(--purple)" }}>{ddPct !== null ? ddPct + "%" : "-"}</div></div>}
-      {!isDCA && config.fields.contratos && F("Contratos", "contratos", "number")}
+      {config.fields.puntosSL && F("Puntos SL", "puntosSlStr", "number")}
+      {config.fields.ddPuntos && F("DD pts", "ddPuntos", "number")}
+      {config.fields.ddPuntos && <div className="field"><label>DD%</label><div className="af" style={{ color: ddPct !== null && ddPct > 50 ? "var(--red)" : "var(--purple)" }}>{ddPct !== null ? ddPct + "%" : "-"}</div></div>}
+      {config.fields.contratos && F("Contratos", "contratos", "number")}
     </div>
-    {!isDCA && config.fields.scaling && <div className="form-grid" style={{ marginTop: 12 }}>
+    {config.fields.scaling && <div className="form-grid" style={{ marginTop: 12 }}>
       {F("Contratos a favor", "contratosFavor", "number")}
       {F("Contratos en contra", "contratosContra", "number")}
       <div className="field"><label>Total contratos</label><div className="af" style={{ color: "var(--accent)", fontWeight: 700 }}>{pn(form.contratos) + pn(form.contratosFavor) + pn(form.contratosContra) || "-"}</div></div>
     </div>}
-    {isDCA && <div className="form-grid" style={{ marginTop: 12 }}>
+    {config.fields.promediadas && <div className="form-grid" style={{ marginTop: 12 }}>
       {F("Contratos iniciales", "contratos", "number")}
       {F("Promediadas (veces)", "promediadas", "number")}
       <div className="field"><label>Total contratos</label><div className="af" style={{ color: "var(--accent)", fontWeight: 700 }}>{pn(form.contratos) && pn(form.promediadas) ? pn(form.contratos) * pn(form.promediadas) : "-"}</div></div>
@@ -1026,10 +1024,10 @@ function MainApp() {
   <div className="card"><div className="st">Resultado</div>
     <div className="form-grid">
       {F("Resultado", "resultado", null, RESS)}
-      {!isDCA && config.fields.direccion && F("Dir", "direccionDia", null, DIRS)}
+      {config.fields.direccion && F("Dir", "direccionDia", null, DIRS)}
     </div>
 
-    {showDolarBlock ? (
+    {showDolarBlock && (
       <div style={{ marginTop: 14 }}>
         <div className="form-grid">
           {F("Riesgo maximo ($)", "capitalArriesgado", "number")}
@@ -1050,7 +1048,8 @@ function MainApp() {
         })()}
         <p style={{ marginTop: 6, fontSize: 11, color: "var(--text3)", fontFamily: "var(--mono)" }}>Ideal para DCA: define cuanto arriesgas y tu TP en $. Si es SL, se asume que perdiste el riesgo maximo completo — no hace falta escribirlo dos veces.</p>
       </div>
-    ) : (form.resultado === "WIN" || form.resultado === "SL") && <div style={{ marginTop: 14 }}>
+    )}
+    {config.fields.rRapido && (form.resultado === "WIN" || form.resultado === "SL") && <div style={{ marginTop: 14 }}>
       <label style={{ fontSize: 9, color: "var(--text3)", textTransform: "uppercase", letterSpacing: ".8px", fontWeight: 600, fontFamily: "var(--mono)", display: "block", marginBottom: 6 }}>R resultado — rapido o manual</label>
       <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
         {config.rLevels.map(rl => {
@@ -1063,8 +1062,8 @@ function MainApp() {
       </div>
     </div>}
 
-    {!isDCA && <div className="form-grid" style={{ marginTop: 14 }}>{F("MFE (max a favor)", "mfe", "number")}</div>}
-    {!isDCA && <p style={{ marginTop: 8, fontSize: 11, color: "var(--text3)", fontFamily: "var(--mono)" }}>MFE = cuanto R llego a estar a favor el trade en su punto maximo, gane o pierda al final. Util para medir si sales muy pronto.</p>}
+    {config.fields.mfe && <div className="form-grid" style={{ marginTop: 14 }}>{F("MFE (max a favor)", "mfe", "number")}</div>}
+    {config.fields.mfe && <p style={{ marginTop: 8, fontSize: 11, color: "var(--text3)", fontFamily: "var(--mono)" }}>MFE = cuanto R llego a estar a favor el trade en su punto maximo, gane o pierda al final. Util para medir si sales muy pronto.</p>}
     {!showDolarBlock && form.resultado === "SL" && <p style={{ marginTop: 4, fontSize: 12, color: "var(--red)", fontFamily: "var(--mono)" }}>{pn(form.rResultado) ? `SL=${form.rResultado}R` : "SL=-1R (default)"}</p>}
     {!showDolarBlock && form.resultado === "BE" && <p style={{ marginTop: 4, fontSize: 12, color: "var(--yellow)", fontFamily: "var(--mono)" }}>BE=0R</p>}
     {!showDolarBlock && isWin && pn(form.rResultado) > 0 && <p style={{ marginTop: 4, fontSize: 12, color: "var(--green)", fontFamily: "var(--mono)" }}>+{form.rResultado}R = +{fmt$(pn(form.rResultado) * rValue)}</p>}
@@ -1218,11 +1217,16 @@ function MainApp() {
       {[
         ["hora", "Hora inicio / final"],
         ["atr", "ATR"],
+        ["setup", "Setup"],
         ["direccion", "Direccion del dia"],
+        ["puntosSL", "Puntos de SL"],
         ["ddPuntos", "Puntos de drawdown (DD)"],
         ["contratos", "Cantidad de contratos"],
         ["scaling", "Contratos agregados (a favor / en contra)"],
-        ["dolares", "Modo $ variable (DCA: capital arriesgado + resultado en $)"]
+        ["promediadas", "Promediadas DCA (contratos x veces)"],
+        ["dolares", "Modo $ variable (riesgo, DD y TP en $)"],
+        ["rRapido", "Botones rapidos de R"],
+        ["mfe", "MFE (movimiento maximo a favor)"]
       ].map(([key, label]) => (
         <label key={key} style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer", fontSize: 13 }}>
           <input type="checkbox" checked={!!config.fields[key]} onChange={e => setConfig(c => ({ ...c, fields: { ...c.fields, [key]: e.target.checked } }))} style={{ width: 16, height: 16, accentColor: "var(--accent)", cursor: "pointer" }} />
