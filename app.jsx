@@ -614,7 +614,8 @@ function MainApp() {
     if ((config.fields.dolares || form.estrategia === "DCA") && pn(form.capitalArriesgado) > 0) {
       const resultDollar = t.resultado === "WIN" ? pn(form.tpDolar) : t.resultado === "SL" ? -pn(form.capitalArriesgado) : 0
       t.resultadoDolar = String(resultDollar)
-      const rEq = resultDollar / pn(form.capitalArriesgado)
+      const riskBase = pn(form.ddDolar) > 0 ? pn(form.ddDolar) : pn(form.capitalArriesgado)
+      const rEq = resultDollar / riskBase
       t.rResultado = String(Math.round(rEq * 10000) / 10000)
     }
     if (t.resultado === "BE") t.rResultado = "0"
@@ -1040,10 +1041,11 @@ function MainApp() {
         </div>
         {pn(form.capitalArriesgado) > 0 && (() => {
           const resultDollar = form.resultado === "WIN" ? pn(form.tpDolar) : form.resultado === "SL" ? -pn(form.capitalArriesgado) : 0
-          const rEq = Math.round((resultDollar / pn(form.capitalArriesgado)) * 10000) / 10000
+          const riskBase = pn(form.ddDolar) > 0 ? pn(form.ddDolar) : pn(form.capitalArriesgado)
+          const rEq = Math.round((resultDollar / riskBase) * 10000) / 10000
           return <p style={{ marginTop: 8, fontSize: 12, fontFamily: "var(--mono)", color: rEq > 0 ? "var(--green)" : rEq < 0 ? "var(--red)" : "var(--yellow)" }}>
             {form.resultado === "SL" ? `SL = pierdes el riesgo maximo completo: ${fmt$(-pn(form.capitalArriesgado))}` : form.resultado === "BE" ? "BE = $0" : `Ganancia: ${fmt$(pn(form.tpDolar))}`}
-            {" — "}R equivalente: {rEq > 0 ? "+" : ""}{rEq}R
+            {" — "}R equivalente: {rEq > 0 ? "+" : ""}{rEq}R {pn(form.ddDolar) > 0 ? "(vs DD maximo)" : "(vs riesgo maximo, sin DD registrado)"}
           </p>
         })()}
         <p style={{ marginTop: 6, fontSize: 11, color: "var(--text3)", fontFamily: "var(--mono)" }}>Ideal para DCA: define cuanto arriesgas y tu TP en $. Si es SL, se asume que perdiste el riesgo maximo completo — no hace falta escribirlo dos veces.</p>
