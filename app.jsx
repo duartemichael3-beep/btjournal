@@ -430,12 +430,13 @@ function DayModal({ date, trades, onClose, onViewSS, rValue, onEdit, onDelete })
   const sinop = dt.filter(t => t.isSinOp)
   const s = cS(real, rValue)
   const dayR = Math.round(real.reduce((a, t) => a + gR(t), 0) * 100) / 100
+  const dayDollar = Math.round(real.reduce((a, t) => a + gDolarReal(t, rValue), 0))
 
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.85)", zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }} onClick={onClose}>
       <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 16, padding: 24, width: "100%", maxWidth: 850, maxHeight: "85vh", overflow: "auto" }} onClick={e => e.stopPropagation()}>
         <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 16 }}>
-          <h2 style={{ fontSize: 20, fontWeight: 700, fontFamily: "var(--mono)" }}>{fmtD(date)} <span style={{ fontSize: 14, color: dayR >= 0 ? "var(--green)" : "var(--red)" }}>{real.length ? fmt$(dayR * rValue) : ""}</span></h2>
+          <h2 style={{ fontSize: 20, fontWeight: 700, fontFamily: "var(--mono)" }}>{fmtD(date)} <span style={{ fontSize: 14, color: dayR >= 0 ? "var(--green)" : "var(--red)" }}>{real.length ? fmt$(dayDollar) : ""}</span></h2>
           <button className="btn bo bx" onClick={onClose}>✕</button>
         </div>
         {sinop.length > 0 && sinop.map(t => (
@@ -818,9 +819,10 @@ function MainApp() {
   const monthName = new Date(calYear, calMonth).toLocaleString("es", { month: "long", year: "numeric" })
   const calCells = []; for (let i = 0; i < firstDayOfWeek; i++) calCells.push(null); for (let d = 1; d <= daysInMonth; d++) calCells.push(d)
   const calWeeks = []; for (let i = 0; i < calCells.length; i += 7) calWeeks.push(calCells.slice(i, i + 7))
-  const weekSums = calWeeks.map(wk => { let r = 0, c = 0; wk.forEach(d => { if (d && calByDay[d]) rT(calByDay[d]).forEach(t => { r += gR(t); c++ }) }); return { r: Math.round(r * 100) / 100, c } })
+  const weekSums = calWeeks.map(wk => { let r = 0, dol = 0, c = 0; wk.forEach(d => { if (d && calByDay[d]) rT(calByDay[d]).forEach(t => { r += gR(t); dol += gDolarReal(t, rValue); c++ }) }); return { r: Math.round(r * 100) / 100, dollar: Math.round(dol), c } })
   const monthTrades = calSourceTrades.filter(t => { if (!t.fecha) return false; const d = safeDate(t.fecha); return d.getMonth() === calMonth && d.getFullYear() === calYear })
   const monthR = Math.round(rT(monthTrades).reduce((a, t) => a + gR(t), 0) * 100) / 100
+  const monthDollar = Math.round(rT(monthTrades).reduce((a, t) => a + gDolarReal(t, rValue), 0))
   const makeDate = d => `${calYear}-${String(calMonth + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`
 
   // Config tab local state helpers
@@ -927,25 +929,26 @@ function MainApp() {
           if (!d) return <div key={di} style={{ padding: 10, borderBottom: "1px solid var(--border)", background: "var(--bg)" }} />
           const dayTrades = calByDay[d] || [], realTrades = rT(dayTrades), hasSinOp = dayTrades.some(t => t.isSinOp)
           const dayR = Math.round(realTrades.reduce((a, t) => a + gR(t), 0) * 100) / 100
+          const dayDollar = Math.round(realTrades.reduce((a, t) => a + gDolarReal(t, rValue), 0))
           const hasScreenshot = dayTrades.some(t => t.screenshot)
           const bg = hasSinOp && !realTrades.length ? "rgba(90,100,120,.08)" : realTrades.length ? (dayR > 0 ? "rgba(0,214,143,.08)" : dayR < 0 ? "rgba(255,71,87,.08)" : "var(--surface)") : "var(--surface)"
           return (<div key={di} style={{ padding: "6px 4px", borderBottom: "1px solid var(--border)", borderRight: "1px solid var(--border)", background: bg, minHeight: 58, cursor: dayTrades.length ? "pointer" : "default" }} onClick={() => dayTrades.length && setDayModal(makeDate(d))}>
             <div style={{ fontSize: 9, color: "var(--text3)", marginBottom: 3 }}>{d}</div>
             {hasSinOp && !realTrades.length ? <div style={{ fontSize: 10, color: "var(--text3)", fontWeight: 600 }}>SIN OP</div>
-              : realTrades.length ? <><div style={{ fontSize: 13, fontWeight: 700, color: dayR > 0 ? "var(--green)" : dayR < 0 ? "var(--red)" : "var(--yellow)", fontFamily: "var(--mono)" }}>{fmt$(dayR * rValue)}</div><div style={{ fontSize: 8, color: "var(--text3)", marginTop: 1 }}>{realTrades.length}t{hasScreenshot ? " 📷" : ""}</div></>
+              : realTrades.length ? <><div style={{ fontSize: 13, fontWeight: 700, color: dayR > 0 ? "var(--green)" : dayR < 0 ? "var(--red)" : "var(--yellow)", fontFamily: "var(--mono)" }}>{fmt$(dayDollar)}</div><div style={{ fontSize: 8, color: "var(--text3)", marginTop: 1 }}>{realTrades.length}t{hasScreenshot ? " 📷" : ""}</div></>
               : <div style={{ fontSize: 8, color: "var(--text3)" }}>-</div>}
           </div>)
         })}
         {Array(7 - wk.length).fill(null).map((_, i) => (<div key={`p${i}`} style={{ padding: 10, borderBottom: "1px solid var(--border)", background: "var(--bg)" }} />))}
         <div style={{ padding: "6px 4px", borderBottom: "1px solid var(--border)", background: "var(--surface2)", display: "flex", flexDirection: "column", justifyContent: "center", alignItems: "center" }}>
           <div style={{ fontSize: 8, color: "var(--text3)" }}>S{wi + 1}</div>
-          <div style={{ fontSize: 12, fontWeight: 700, color: weekSums[wi].r > 0 ? "var(--green)" : weekSums[wi].r < 0 ? "var(--red)" : "var(--text3)", fontFamily: "var(--mono)" }}>{weekSums[wi].c ? fmt$(weekSums[wi].r * rValue) : "-"}</div>
+          <div style={{ fontSize: 12, fontWeight: 700, color: weekSums[wi].r > 0 ? "var(--green)" : weekSums[wi].r < 0 ? "var(--red)" : "var(--text3)", fontFamily: "var(--mono)" }}>{weekSums[wi].c ? fmt$(weekSums[wi].dollar) : "-"}</div>
         </div>
       </React.Fragment>))}
     </div>
     <div style={{ display: "flex", justifyContent: "flex-end", gap: 16, padding: "10px 18px", borderTop: "1px solid var(--border)", background: "var(--surface2)" }}>
       <span style={{ fontSize: 11, color: "var(--text3)", fontFamily: "var(--mono)" }}>TRADES: <b style={{ color: "var(--text)" }}>{rT(monthTrades).length}</b></span>
-      <span style={{ fontSize: 11, color: "var(--text3)", fontFamily: "var(--mono)" }}>P&L: <b style={{ color: monthR >= 0 ? "var(--green)" : "var(--red)" }}>{monthR >= 0 ? "+" : ""}{fmt$(monthR * rValue)}</b></span>
+      <span style={{ fontSize: 11, color: "var(--text3)", fontFamily: "var(--mono)" }}>P&L: <b style={{ color: monthR >= 0 ? "var(--green)" : "var(--red)" }}>{monthR >= 0 ? "+" : ""}{fmt$(monthDollar)}</b></span>
     </div>
   </div>
 </>)}
@@ -1359,3 +1362,4 @@ function App() {
 }
 
 ReactDOM.createRoot(document.getElementById('root')).render(<React.StrictMode><App /></React.StrictMode>)
+
