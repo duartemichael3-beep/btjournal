@@ -41,11 +41,12 @@ const saveTrades = (trades) => {
 
 const DEFAULT_CONFIG = {
   setups: ["M1", "M2", "M3", "J1", "J2"],
+  estrategias: ["DCA", "Scalping"],
   contextos: ["APERTURA", "ROMPIMIENTO", "GIRO"],
   rValue: 300,
   instagram: "",
   rLevels: [1, 2, 3, 4, 5],
-  fields: { atr: true, direccion: true, ddPuntos: true, contratos: false, scaling: false, hora: true }
+  fields: { atr: true, direccion: true, ddPuntos: true, contratos: false, scaling: false, hora: true, dolares: false }
 }
 const loadConfig = () => {
   try {
@@ -74,10 +75,11 @@ const MESES_ES = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio"
 
 const DFT = {
   fecha: "", horaInicio: "09:30", horaFinal: "10:00", atr: "",
-  setup: "", contexto: "", buySell: "BUY", puntosSlStr: "",
+  setup: "", estrategia: "", contexto: "", buySell: "BUY", puntosSlStr: "",
   rResultado: "", mfe: "", resultado: "SL",
   direccionDia: "RANGO", ddPuntos: "",
-  contratos: "", contratosFavor: "", contratosContra: "",
+  contratos: "", contratosFavor: "", contratosContra: "", promediadas: "",
+  capitalArriesgado: "", tpDolar: "", resultadoDolar: "", ddDolar: "",
   screenshot: null, screenshotPreview: null, notas: "",
   isSinOp: false, mode: "bt"
 }
@@ -125,6 +127,13 @@ const gMFE = t => {
 }
 
 const gDD = t => { const s = pn(t.puntosSlStr), d = pn(t.ddPuntos); return s && d ? Math.round(d / s * 10000) / 100 : null }
+// Real dollar P&L for a trade. If the trade was registered with a direct dollar
+// result (DCA / variable risk mode), use that exact number. Otherwise fall back
+// to the standard fixed-R calculation.
+const gDolarReal = (t, rValue) => {
+  if (t.resultadoDolar !== undefined && t.resultadoDolar !== "" && t.resultadoDolar !== null) return pn(t.resultadoDolar)
+  return gR(t) * rValue
+}
 const hBucket = h => { if (!h || !h.includes(":")) return ""; const [hh, mm] = h.split(":").map(Number); return `${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}` }
 
 // ═══════════════════════════════════════════════
@@ -151,6 +160,8 @@ function cS(trades, rValue) {
   const dd = t2.map(gDD).filter(v => v !== null)
   const aDD = dd.length ? Math.round(dd.reduce((a, c) => a + c, 0) / dd.length * 100) / 100 : 0
   const exp = Math.round((tR / t2.length) * 100) / 100
+  // Real dollar totals: uses actual $ entered per trade when present (DCA), else R*rValue
+  const dollarSum = Math.round(t2.reduce((a, t) => a + gDolarReal(t, rValue), 0))
 
   let mxW = 0, mxL = 0, cW = 0, cL = 0
   const sorted = [...t2].sort((a, b2) => safeDate(a.fecha) - safeDate(b2.fecha))
@@ -188,10 +199,10 @@ function cS(trades, rValue) {
   return {
     total: t2.length, wins: w.length, losses: l.length, bes: b.length,
     winRate: Math.round(w.length / t2.length * 10000) / 100,
-    totalR: tR, totalDollar: Math.round(tR * rValue),
+    totalR: tR, totalDollar: dollarSum,
     bestR: rs.length ? Math.max(...rs) : 0, worstR: rs.length ? Math.min(...rs) : 0,
     profitFactor: gl ? Math.round(gw / gl * 10000) / 10000 : gw > 0 ? Infinity : 0,
-    expectancy: exp, expectDollar: Math.round(exp * rValue),
+    expectancy: exp, expectDollar: Math.round(dollarSum / t2.length),
     avgDDpct: aDD,
     avgDurWin: dW.length ? Math.round(dW.reduce((a, c) => a + c, 0) / dW.length) : 0,
     avgDurSL: dS.length ? Math.round(dS.reduce((a, c) => a + c, 0) / dS.length) : 0,
@@ -450,7 +461,7 @@ function DayModal({ date, trades, onClose, onViewSS, rValue, onEdit, onDelete })
                   <td><STag s={t.setup} /></td><td><BTag b={t.buySell} /></td>
                   <td className="mono bold" style={{ color: r > 0 ? "var(--green)" : r < 0 ? "var(--red)" : "var(--yellow)" }}>{fmtR(r)}</td>
                   <td className="mono" style={{ color: "var(--purple)" }}>{mfe ? mfe + "R" : "-"}</td>
-                  <td className="mono bold" style={{ color: r >= 0 ? "var(--green)" : "var(--red)" }}>{fmt$(r * rValue)}</td>
+                  <td className="mono bold" style={{ color: r >= 0 ? "var(--green)" : "var(--red)" }}>{fmt$(gDolarReal(t, rValue))}</td>
                   <td><RTag r={t.resultado} /></td>
                   <td>{t.screenshot && <img src={t.screenshot} style={{ maxHeight: 40, borderRadius: 4, cursor: "pointer" }} onClick={() => onViewSS(t.screenshot)} />}</td>
                   <td>{(onEdit || onDelete) && <div style={{ display: "flex", gap: 3 }}>
@@ -589,6 +600,7 @@ function MainApp() {
   // Ensure form.setup defaults to first configured setup
   useEffect(() => { if (!form.setup && config.setups.length) setForm(f => ({ ...f, setup: config.setups[0] })) }, [config.setups])
   useEffect(() => { if (!form.contexto && config.contextos.length) setForm(f => ({ ...f, contexto: config.contextos[0] })) }, [config.contextos])
+  useEffect(() => { if (!form.estrategia && config.estrategias.length) setForm(f => ({ ...f, estrategia: config.estrategias[0] })) }, [config.estrategias])
 
   const setHI = v => setForm(f => ({ ...f, horaInicio: v, duracionTrade: String(cDur(v, f.horaFinal) || "") }))
   const setHF = v => setForm(f => ({ ...f, horaFinal: v, duracionTrade: String(cDur(f.horaInicio, v) || "") }))
@@ -597,7 +609,14 @@ function MainApp() {
     if (!form.fecha) return alert("Fecha obligatoria")
     if (!form.isSinOp && !form.setup) return alert("Selecciona un setup")
     const t = { ...form, duracionTrade: String(cDur(form.horaInicio, form.horaFinal) || ""), mode: appMode }
-    if (config.fields.scaling) t.contratosTotal = String(pn(form.contratos) + pn(form.contratosFavor) + pn(form.contratosContra))
+    if (form.estrategia === "DCA" && pn(form.contratos) > 0 && pn(form.promediadas) > 0) t.contratosTotal = String(pn(form.contratos) * pn(form.promediadas))
+    else if (config.fields.scaling) t.contratosTotal = String(pn(form.contratos) + pn(form.contratosFavor) + pn(form.contratosContra))
+    if ((config.fields.dolares || form.estrategia === "DCA") && pn(form.capitalArriesgado) > 0) {
+      const resultDollar = t.resultado === "WIN" ? pn(form.tpDolar) : t.resultado === "SL" ? -pn(form.capitalArriesgado) : 0
+      t.resultadoDolar = String(resultDollar)
+      const rEq = resultDollar / pn(form.capitalArriesgado)
+      t.rResultado = String(Math.round(rEq * 10000) / 10000)
+    }
     if (t.resultado === "BE") t.rResultado = "0"
     if (t.resultado === "SL" && !pn(t.rResultado)) t.rResultado = "-1"
     if (editId) { setAllTrades(prev => prev.map(tr => tr.id === editId ? { ...t, id: editId } : tr)); setEditId(null); setToast("Trade actualizado ✓"); setTab("trades") }
@@ -643,7 +662,7 @@ function MainApp() {
   }
 
   const exportCSV = () => {
-    const h = ["fecha", "horaInicio", "horaFinal", "duracionTrade", "atr", "setup", "contexto", "buySell", "puntosSlStr", "rResultado", "mfe", "resultado", "direccionDia", "ddPuntos", "contratos", "contratosFavor", "contratosContra", "contratosTotal", "notas", "isSinOp"]
+    const h = ["fecha", "horaInicio", "horaFinal", "duracionTrade", "atr", "setup", "estrategia", "contexto", "buySell", "puntosSlStr", "rResultado", "mfe", "resultado", "direccionDia", "ddPuntos", "contratos", "promediadas", "contratosFavor", "contratosContra", "contratosTotal", "capitalArriesgado", "tpDolar", "resultadoDolar", "ddDolar", "notas", "isSinOp"]
     const csv = [h.join(","), ...trades.map(t => h.map(k => `"${t[k] !== undefined ? t[k] : ""}"`).join(","))].join("\n")
     const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" })); a.download = `${appMode}_journal.csv`; a.click()
   }
@@ -742,6 +761,8 @@ function MainApp() {
   const tipsData = useMemo(() => genTips(filtered, rValue), [filtered, rValue])
 
   const isWin = form.resultado === "WIN"
+  const isDCA = form.estrategia === "DCA"
+  const showDolarBlock = config.fields.dolares || isDCA
   const autoDur = cDur(form.horaInicio, form.horaFinal)
   const ddPct = gDD(form)
   const accentColor = appMode === "journal" ? "var(--purple)" : "var(--accent)"
@@ -804,6 +825,7 @@ function MainApp() {
 
   // Config tab local state helpers
   const [setupInput, setSetupInput] = useState(config.setups.join(", "))
+  const [estrategiaInput, setEstrategiaInput] = useState(config.estrategias.join(", "))
   const [ctxInput, setCtxInput] = useState(config.contextos.join(", "))
   const [rValueInput, setRValueInput] = useState(String(rValue))
   const [igInput, setIgInput] = useState(config.instagram || "")
@@ -945,7 +967,7 @@ function MainApp() {
           <td><STag s={t.setup} /></td><td><BTag b={t.buySell} /></td>
           <td className="mono bold" style={{ color: r > 0 ? "var(--green)" : r < 0 ? "var(--red)" : "var(--yellow)" }}>{fmtR(r)}</td>
           <td className="mono" style={{ color: "var(--purple)" }}>{mfe ? mfe + "R" : "-"}</td>
-          <td className="mono bold" style={{ color: r >= 0 ? "var(--green)" : "var(--red)" }}>{fmt$(r * rValue)}</td>
+          <td className="mono bold" style={{ color: r >= 0 ? "var(--green)" : "var(--red)" }}>{fmt$(gDolarReal(t, rValue))}</td>
           <td><RTag r={t.resultado} /></td><td><DTag d={t.direccionDia} /></td>
           <td>{t.screenshot && <span style={{ cursor: "pointer", color: accentColor }} onClick={() => setViewSS(t.screenshot)}>Img</span>}</td>
           <td><div style={{ display: "flex", gap: 3 }}><button className="btn bo bx" onClick={() => edit(t)}>E</button><button className="btn bd bx" onClick={() => del(t.id)}>X</button></div></td>
@@ -971,35 +993,62 @@ function MainApp() {
   <div className="card"><div className="st">General</div>
     <div className="form-grid">
       <DatePick value={form.fecha} onChange={v => setForm(f => ({ ...f, fecha: v }))} label="Fecha" />
-      {config.fields.hora && <TP label="Hora inicio" value={form.horaInicio} onChange={setHI} />}
-      {config.fields.hora && <TP label="Hora final" value={form.horaFinal} onChange={setHF} />}
-      {config.fields.hora && <div className="field"><label>Dur</label><div className="af">{autoDur ? autoDur + "m" : "-"}</div></div>}
-      {config.fields.atr && F("ATR", "atr", "number")}
+      {!isDCA && config.fields.hora && <TP label="Hora inicio" value={form.horaInicio} onChange={setHI} />}
+      {!isDCA && config.fields.hora && <TP label="Hora final" value={form.horaFinal} onChange={setHF} />}
+      {!isDCA && config.fields.hora && <div className="field"><label>Dur</label><div className="af">{autoDur ? autoDur + "m" : "-"}</div></div>}
+      {!isDCA && config.fields.atr && F("ATR", "atr", "number")}
     </div>
   </div>
+  {isDCA && <p style={{ marginTop: -10, marginBottom: 16, fontSize: 11, color: "var(--purple)", fontFamily: "var(--mono)" }}>Modo DCA activo — se ocultaron los campos que no aplican a esta estrategia.</p>}
   <div className="card"><div className="st">Trade</div>
     <div className="form-grid">
-      {F("Setup", "setup", null, config.setups)}
-      {F("Contexto", "contexto", null, config.contextos)}
+      {!isDCA && F("Setup", "setup", null, config.setups)}
+      {F("Estrategia", "estrategia", null, config.estrategias)}
+      {!isDCA && F("Contexto", "contexto", null, config.contextos)}
       {F("Buy/Sell", "buySell", null, ["BUY", "SELL"])}
-      {F("Puntos SL", "puntosSlStr", "number")}
-      {config.fields.ddPuntos && F("DD pts", "ddPuntos", "number")}
-      {config.fields.ddPuntos && <div className="field"><label>DD%</label><div className="af" style={{ color: ddPct !== null && ddPct > 50 ? "var(--red)" : "var(--purple)" }}>{ddPct !== null ? ddPct + "%" : "-"}</div></div>}
-      {config.fields.contratos && F("Contratos", "contratos", "number")}
+      {!isDCA && F("Puntos SL", "puntosSlStr", "number")}
+      {!isDCA && config.fields.ddPuntos && F("DD pts", "ddPuntos", "number")}
+      {!isDCA && config.fields.ddPuntos && <div className="field"><label>DD%</label><div className="af" style={{ color: ddPct !== null && ddPct > 50 ? "var(--red)" : "var(--purple)" }}>{ddPct !== null ? ddPct + "%" : "-"}</div></div>}
+      {!isDCA && config.fields.contratos && F("Contratos", "contratos", "number")}
     </div>
-    {config.fields.scaling && <div className="form-grid" style={{ marginTop: 12 }}>
+    {!isDCA && config.fields.scaling && <div className="form-grid" style={{ marginTop: 12 }}>
       {F("Contratos a favor", "contratosFavor", "number")}
       {F("Contratos en contra", "contratosContra", "number")}
       <div className="field"><label>Total contratos</label><div className="af" style={{ color: "var(--accent)", fontWeight: 700 }}>{pn(form.contratos) + pn(form.contratosFavor) + pn(form.contratosContra) || "-"}</div></div>
+    </div>}
+    {isDCA && <div className="form-grid" style={{ marginTop: 12 }}>
+      {F("Contratos iniciales", "contratos", "number")}
+      {F("Promediadas (veces)", "promediadas", "number")}
+      <div className="field"><label>Total contratos</label><div className="af" style={{ color: "var(--accent)", fontWeight: 700 }}>{pn(form.contratos) && pn(form.promediadas) ? pn(form.contratos) * pn(form.promediadas) : "-"}</div></div>
     </div>}
   </div>
   <div className="card"><div className="st">Resultado</div>
     <div className="form-grid">
       {F("Resultado", "resultado", null, RESS)}
-      {config.fields.direccion && F("Dir", "direccionDia", null, DIRS)}
+      {!isDCA && config.fields.direccion && F("Dir", "direccionDia", null, DIRS)}
     </div>
 
-    {(form.resultado === "WIN" || form.resultado === "SL") && <div style={{ marginTop: 14 }}>
+    {showDolarBlock ? (
+      <div style={{ marginTop: 14 }}>
+        <div className="form-grid">
+          {F("Riesgo maximo ($)", "capitalArriesgado", "number")}
+          {F("DD maximo ($)", "ddDolar", "number")}
+          <div className="field">
+            <label>TP ($){form.resultado === "SL" && <span style={{ color: "var(--text3)", textTransform: "none", letterSpacing: 0 }}> — inhabilitado en SL</span>}</label>
+            <input className="inp" type="number" value={form.tpDolar} onChange={e => setForm(f => ({ ...f, tpDolar: e.target.value }))} disabled={form.resultado === "SL" || form.resultado === "BE"} style={form.resultado === "SL" || form.resultado === "BE" ? { opacity: 0.4, cursor: "not-allowed" } : {}} />
+          </div>
+        </div>
+        {pn(form.capitalArriesgado) > 0 && (() => {
+          const resultDollar = form.resultado === "WIN" ? pn(form.tpDolar) : form.resultado === "SL" ? -pn(form.capitalArriesgado) : 0
+          const rEq = Math.round((resultDollar / pn(form.capitalArriesgado)) * 10000) / 10000
+          return <p style={{ marginTop: 8, fontSize: 12, fontFamily: "var(--mono)", color: rEq > 0 ? "var(--green)" : rEq < 0 ? "var(--red)" : "var(--yellow)" }}>
+            {form.resultado === "SL" ? `SL = pierdes el riesgo maximo completo: ${fmt$(-pn(form.capitalArriesgado))}` : form.resultado === "BE" ? "BE = $0" : `Ganancia: ${fmt$(pn(form.tpDolar))}`}
+            {" — "}R equivalente: {rEq > 0 ? "+" : ""}{rEq}R
+          </p>
+        })()}
+        <p style={{ marginTop: 6, fontSize: 11, color: "var(--text3)", fontFamily: "var(--mono)" }}>Ideal para DCA: define cuanto arriesgas y tu TP en $. Si es SL, se asume que perdiste el riesgo maximo completo — no hace falta escribirlo dos veces.</p>
+      </div>
+    ) : (form.resultado === "WIN" || form.resultado === "SL") && <div style={{ marginTop: 14 }}>
       <label style={{ fontSize: 9, color: "var(--text3)", textTransform: "uppercase", letterSpacing: ".8px", fontWeight: 600, fontFamily: "var(--mono)", display: "block", marginBottom: 6 }}>R resultado — rapido o manual</label>
       <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
         {config.rLevels.map(rl => {
@@ -1012,11 +1061,11 @@ function MainApp() {
       </div>
     </div>}
 
-    <div className="form-grid" style={{ marginTop: 14 }}>{F("MFE (max a favor)", "mfe", "number")}</div>
-    <p style={{ marginTop: 8, fontSize: 11, color: "var(--text3)", fontFamily: "var(--mono)" }}>MFE = cuanto R llego a estar a favor el trade en su punto maximo, gane o pierda al final. Util para medir si sales muy pronto.</p>
-    {form.resultado === "SL" && <p style={{ marginTop: 4, fontSize: 12, color: "var(--red)", fontFamily: "var(--mono)" }}>{pn(form.rResultado) ? `SL=${form.rResultado}R` : "SL=-1R (default)"}</p>}
-    {form.resultado === "BE" && <p style={{ marginTop: 4, fontSize: 12, color: "var(--yellow)", fontFamily: "var(--mono)" }}>BE=0R</p>}
-    {isWin && pn(form.rResultado) > 0 && <p style={{ marginTop: 4, fontSize: 12, color: "var(--green)", fontFamily: "var(--mono)" }}>+{form.rResultado}R = +{fmt$(pn(form.rResultado) * rValue)}</p>}
+    {!isDCA && <div className="form-grid" style={{ marginTop: 14 }}>{F("MFE (max a favor)", "mfe", "number")}</div>}
+    {!isDCA && <p style={{ marginTop: 8, fontSize: 11, color: "var(--text3)", fontFamily: "var(--mono)" }}>MFE = cuanto R llego a estar a favor el trade en su punto maximo, gane o pierda al final. Util para medir si sales muy pronto.</p>}
+    {!showDolarBlock && form.resultado === "SL" && <p style={{ marginTop: 4, fontSize: 12, color: "var(--red)", fontFamily: "var(--mono)" }}>{pn(form.rResultado) ? `SL=${form.rResultado}R` : "SL=-1R (default)"}</p>}
+    {!showDolarBlock && form.resultado === "BE" && <p style={{ marginTop: 4, fontSize: 12, color: "var(--yellow)", fontFamily: "var(--mono)" }}>BE=0R</p>}
+    {!showDolarBlock && isWin && pn(form.rResultado) > 0 && <p style={{ marginTop: 4, fontSize: 12, color: "var(--green)", fontFamily: "var(--mono)" }}>+{form.rResultado}R = +{fmt$(pn(form.rResultado) * rValue)}</p>}
   </div>
   <div className="card"><div className="st">Screenshot & Notas</div>
     <div className="g2">
@@ -1141,6 +1190,16 @@ function MainApp() {
   </div>
 
   <div className="card">
+    <div className="st">Estrategias</div>
+    <p style={{ fontSize: 12, color: "var(--text2)", marginBottom: 10 }}>Distingue la metodologia usada (ej: DCA, Scalping, Swing), independiente del setup especifico. Separadas por comas.</p>
+    <div style={{ display: "flex", gap: 8 }}>
+      <input className="inp" value={estrategiaInput} onChange={e => setEstrategiaInput(e.target.value)} placeholder="DCA, Scalping, Swing" />
+      <button className="btn bp bs" onClick={() => { const arr = estrategiaInput.split(",").map(s => s.trim()).filter(Boolean); if (arr.length) setConfig(c => ({ ...c, estrategias: arr })) }}>Guardar</button>
+    </div>
+    <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 10 }}>{config.estrategias.map(s => <span key={s} className="tag tp">{s}</span>)}</div>
+  </div>
+
+  <div className="card">
     <div className="st">Contextos</div>
     <p style={{ fontSize: 12, color: "var(--text2)", marginBottom: 10 }}>Define los contextos de operacion, separados por comas.</p>
     <div style={{ display: "flex", gap: 8 }}>
@@ -1160,7 +1219,8 @@ function MainApp() {
         ["direccion", "Direccion del dia"],
         ["ddPuntos", "Puntos de drawdown (DD)"],
         ["contratos", "Cantidad de contratos"],
-        ["scaling", "Contratos agregados (a favor / en contra)"]
+        ["scaling", "Contratos agregados (a favor / en contra)"],
+        ["dolares", "Modo $ variable (DCA: capital arriesgado + resultado en $)"]
       ].map(([key, label]) => (
         <label key={key} style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer", fontSize: 13 }}>
           <input type="checkbox" checked={!!config.fields[key]} onChange={e => setConfig(c => ({ ...c, fields: { ...c.fields, [key]: e.target.checked } }))} style={{ width: 16, height: 16, accentColor: "var(--accent)", cursor: "pointer" }} />
